@@ -28,3 +28,13 @@ resources/hermes/git/
 # IDE
 .vscode/
 .idea/
+
+# 嵌套的第三方 Hermes 仓库，不作为子模块提交
+.git/
+
+# Hermes 运行时工作区数据
+workspace/output/
+workspace/data/
+workspace/templates/
+workspace/company_context.json
+ (Initial commit: Hermes HR admin desktop app source)
