@@ -1,0 +1,233 @@
+[
+  {
+    "id": "jd-write",
+    "labels": ["岗位JD撰写 & 招聘启事"],
+    "category": "1.1 招聘管理",
+    "workflow": "document-drafting",
+    "description": "撰写岗位说明书、JD 与招聘启事",
+    "skills": ["docx"],
+    "keywords": ["岗位jd", "职位描述", "招聘启事", "岗位说明书", "工作职责", "任职要求", "招聘文案"],
+    "contextHints": ["岗位名称", "所属部门", "汇报对象", "岗位职责", "任职资格", "薪资范围", "招聘渠道", "到岗时间"],
+    "templateHints": ["templates/jd-template.docx（如存在）"],
+    "outputContract": [
+      "先给出可直接使用的正文（Markdown），岗位职责与任职要求分开书写，语言专业且适合发布",
+      "职责与要求需逐条编号，能力要求区分必备项与加分项",
+      "如需生成 Word 文件，写入 output/jd-write/ 目录，并在结尾列出相对路径",
+      "信息不足的字段单独列为“待确认字段”，不得编造薪资、任职年限等硬性信息"
+    ],
+    "guardrails": [
+      "不得出现歧视性表述（年龄、性别、地域、婚育状况等）",
+      "薪资范围缺失时写“面议”，不虚构具体数字"
+    ]
+  },
+  {
+    "id": "resume-screen",
+    "labels": ["简历筛选评分表"],
+    "category": "1.1 招聘管理",
+    "workflow": "spreadsheet-report",
+    "description": "生成可复用的简历筛选评分表",
+    "skills": ["xlsx"],
+    "keywords": ["简历筛选", "评分表", "候选人评估", "简历打分", "筛选标准"],
+    "contextHints": ["目标岗位", "硬性条件（学历/经验/技能）", "加分项", "评分权重", "面试官"],
+    "templateHints": ["templates/resume-screen.xlsx（如存在）"],
+    "outputContract": [
+      "评分维度至少包含：硬性条件、工作经验、技能匹配、项目成果、稳定性、沟通潜力",
+      "给出每项评分标准（1-5 分或 0-100 分）与权重，并提供总分计算公式",
+      "正文中展示评分表结构（Markdown 表格）；如需 Excel，写入 output/resume-screen/",
+      "同时提供“筛选结论建议”栏位说明（建议面试/备选/淘汰）"
+    ],
+    "guardrails": [
+      "评分结果仅作招聘辅助，提示 HR 最终人工复核",
+      "不得根据简历内容推断受保护特征"
+    ]
+  },
+  {
+    "id": "hire-approval",
+    "labels": ["录用审批单"],
+    "category": "1.1 招聘管理",
+    "workflow": "form-filling",
+    "description": "生成录用审批单",
+    "skills": ["docx", "xlsx"],
+    "keywords": ["录用审批", "录用审批单", "入职审批", "招聘审批", "offer审批"],
+    "contextHints": ["候选人姓名", "应聘岗位", "所属部门", "薪资方案", "拟到岗日期", "审批人链", "用人部门意见"],
+    "templateHints": ["templates/hire-approval.docx（如存在）"],
+    "outputContract": [
+      "包含字段：候选人信息、岗位信息、薪资构成、审批流程节点与签字栏、备注",
+      "审批链按 用人部门→HR→分管领导→总经理 给出通用模板，并标注可替换",
+      "正文用 Markdown 表格展示；如需 Word，写入 output/hire-approval/",
+      "缺失信息以“待确认”列出，审批人姓名等不得虚构"
+    ],
+    "guardrails": [
+      "薪资数字未提供时使用占位符 □，不得自行填写",
+      "注明“本单为建议模板，使用前请按公司审批制度核对”"
+    ]
+  },
+  {
+    "id": "offer-letter",
+    "labels": ["Offer录用通知书"],
+    "category": "1.1 招聘管理",
+    "workflow": "form-filling",
+    "description": "生成 Offer 录用通知书",
+    "skills": ["docx"],
+    "keywords": ["offer", "录用通知", "录用通知书", "offer letter", "入职通知", "录取通知"],
+    "contextHints": ["候选人姓名", "录用岗位", "部门", "薪资构成（基本/绩效/补贴）", "试用期", "入职日期", "报到材料", "回复期限"],
+    "templateHints": ["templates/offer-template.docx（如存在）"],
+    "outputContract": [
+      "正文使用正式书面语，包含：录用岗位、薪资构成、试用期、入职时间地点、报到材料、确认回复方式与期限",
+      "条款要完整但不过度承诺；公司信息缺失处使用【公司名称】占位",
+      "如需 Word，写入 output/offer-letter/ 并列出相对路径",
+      "所有缺失字段在回复末尾以“待确认字段”清单列出"
+    ],
+    "guardrails": [
+      "薪酬、入职日期未提供时使用占位符，绝不编造",
+      "法律效力相关表述保持审慎，结尾注明“正式发放前请经 HR/法务复核”"
+    ]
+  },
+  {
+    "id": "onboard-registration",
+    "labels": ["新员工入职登记表"],
+    "category": "1.2 入职管理",
+    "workflow": "form-filling",
+    "description": "生成新员工入职登记表",
+    "skills": ["docx", "xlsx"],
+    "keywords": ["入职登记", "入职登记表", "员工登记", "入职信息表", "新员工登记"],
+    "contextHints": ["公司名称", "需采集字段（基本信息/教育背景/工作经历/紧急联系人/银行卡等）", "是否含声明签字栏"],
+    "templateHints": ["templates/onboard-registration.docx（如存在）"],
+    "outputContract": [
+      "表格字段分组：基本信息、教育背景、工作经历、家庭紧急联系人、银行卡与社保信息、声明与签字栏",
+      "正文以 Markdown 表格呈现；如需 Word/Excel，写入 output/onboard-registration/",
+      "涉及个人信息采集的字段标注“必要/选填”",
+      "附一份填写说明（每栏填写规范）"
+    ],
+    "guardrails": [
+      "银行卡、身份证等敏感信息仅作登记用途，提示按公司隐私制度保管",
+      "不虚构示例员工姓名，示例使用“张三/李四”并标注为示例"
+    ]
+  },
+  {
+    "id": "onboard-welcome",
+    "labels": ["入职欢迎文案"],
+    "category": "1.2 入职管理",
+    "workflow": "document-drafting",
+    "description": "撰写新员工入职欢迎文案",
+    "skills": [],
+    "keywords": ["入职欢迎", "欢迎文案", "欢迎信", "新人欢迎", "入职通知群发"],
+    "contextHints": ["公司名称", "新员工姓名/岗位", "公司风格（正式/活泼）", "发布渠道（邮件/群聊/公告）", "入职日期"],
+    "templateHints": [],
+    "outputContract": [
+      "提供两个版本：正式版（邮件/公告）与活泼版（微信群/企微群）",
+      "内容包含：欢迎语、公司一句话介绍、入职第一天安排提示、对接人占位",
+      "篇幅控制在 150-300 字，可直接复制使用",
+      "姓名等未提供的信息使用【新员工姓名】占位"
+    ],
+    "guardrails": [
+      "不使用夸张承诺（如“包晋升”）",
+      "不得出现内部敏感信息"
+    ]
+  },
+  {
+    "id": "employee-roster",
+    "labels": ["员工花名册表格"],
+    "category": "1.3 员工档案管理",
+    "workflow": "spreadsheet-report",
+    "description": "生成员工花名册表格",
+    "skills": ["xlsx"],
+    "keywords": ["花名册", "员工名册", "人员名册", "员工花名册", "人员花名册"],
+    "contextHints": ["公司名称", "需包含字段（工号/姓名/部门/岗位/入职日期/合同/联系方式等）", "统计口径"],
+    "templateHints": ["templates/employee-roster.xlsx（如存在）"],
+    "outputContract": [
+      "字段至少包含：序号、工号、姓名、部门、岗位、入职日期、转正日期、合同期限、联系方式、在职状态",
+      "正文以 Markdown 表格展示表头与示例行（示例行标注为示例）",
+      "如生成 Excel：第一行冻结、开启筛选、设置列宽，写入 output/employee-roster/",
+      "提供“日常维护建议”（更新责任人与更新频率）"
+    ],
+    "guardrails": [
+      "身份证号、银行卡号默认不纳入花名册展示列，确需采集时单独加密管理",
+      "不得虚构员工数据，示例行必须标注"
+    ]
+  },
+  {
+    "id": "attendance-monthly-report",
+    "labels": ["月度考勤汇总报表"],
+    "category": "1.4 考勤排班管理",
+    "workflow": "spreadsheet-report",
+    "description": "生成月度考勤汇总报表",
+    "skills": ["xlsx"],
+    "keywords": ["考勤汇总", "考勤报表", "月度考勤", "考勤统计", "出勤统计", "考勤表"],
+    "contextHints": ["统计月份", "部门/人员范围", "出勤天数口径", "请假/加班/迟到早退记录来源", "审批单是否已核"],
+    "templateHints": ["templates/attendance-monthly.xlsx（如存在）"],
+    "outputContract": [
+      "表头至少包含：部门、姓名、应出勤天数、实出勤、迟到/早退次数、请假天数（分类）、加班时长、异常说明",
+      "给出统计口径说明（如迟到 X 分钟起计、加班如何折算）",
+      "如生成 Excel，附公式示例（出勤率、合计列），写入 output/attendance-monthly-report/",
+      "强调：数值计算应由表格公式或考勤系统完成，AI 不替代人工核验"
+    ],
+    "guardrails": [
+      "没有真实考勤数据时只生成空模板+示例行，不得虚构统计结果",
+      "法定节假日、调休等以当地规定为准并标注“需复核”"
+    ]
+  },
+  {
+    "id": "recruitment-monthly-report",
+    "labels": ["招聘月度数据统计报表"],
+    "category": "1.1 招聘管理",
+    "workflow": "spreadsheet-report",
+    "description": "生成招聘月度数据统计报表",
+    "skills": ["xlsx"],
+    "keywords": ["招聘统计", "招聘报表", "招聘数据", "招聘月度", "招聘进度", "招聘漏斗"],
+    "contextHints": ["统计月份", "岗位清单", "渠道", "简历量/初试/复试/录用/入职数量", "招聘周期"],
+    "templateHints": ["templates/recruitment-monthly.xlsx（如存在）"],
+    "outputContract": [
+      "报表包含：岗位维度、渠道维度、漏斗转化（简历→初试→复试→Offer→入职）、平均招聘周期、待招岗位",
+      "给出每个指标的计算公式（转化率、完成率）",
+      "正文先给 Markdown 摘要表；如生成 Excel，写入 output/recruitment-monthly-report/",
+      "数据缺失时输出模板与示例行，并列出需要 HR 填写的原始数据清单"
+    ],
+    "guardrails": [
+      "不得虚构招聘数据，示例必须标注",
+      "结论与图表数值必须来自表内公式，不凭印象估算"
+    ]
+  },
+  {
+    "id": "fixed-asset-ledger",
+    "labels": ["固定资产台账模板"],
+    "category": "2.2 资产后勤管理",
+    "workflow": "spreadsheet-report",
+    "description": "生成固定资产台账模板",
+    "skills": ["xlsx"],
+    "keywords": ["固定资产", "资产台账", "固定资产台账", "资产登记", "资产盘点"],
+    "contextHints": ["公司名称", "资产分类", "折旧方式", "使用部门/保管人", "是否需要盘点表"],
+    "templateHints": ["templates/fixed-asset-ledger.xlsx（如存在）"],
+    "outputContract": [
+      "字段至少包含：资产编号、名称、分类、规格型号、购置日期、原值、使用部门、保管人、存放地点、折旧年限、月折旧额、净值、状态",
+      "给出资产编号规则建议（如 ZC-部门-年份-流水号）",
+      "如生成 Excel，附带公式（月折旧额、净值），写入 output/fixed-asset-ledger/",
+      "同时输出配套的“资产盘点表”表头"
+    ],
+    "guardrails": [
+      "折旧年限/残值率仅给通用参考值，并提示按公司财务制度执行",
+      "不虚构资产数据"
+    ]
+  },
+  {
+    "id": "office-supplies-policy",
+    "labels": ["办公用品管理制度"],
+    "category": "2.1 行政制度管理",
+    "workflow": "document-drafting",
+    "description": "制定办公用品管理制度",
+    "skills": ["docx"],
+    "keywords": ["办公用品", "用品管理制度", "办公用品管理", "采购领用", "行政制度"],
+    "contextHints": ["公司规模", "适用部门", "采购审批权限", "月度预算", "领用频次", "库存管理要求"],
+    "templateHints": ["templates/policy-template.docx（如存在）"],
+    "outputContract": [
+      "章节结构：目的与适用范围、职责分工、采购流程、领用与借用、库存盘点、报废处置、费用控制、附则",
+      "每项流程写成可执行步骤，附审批权限表与常用表单名",
+      "制度末尾附执行检查清单与建议试行/修订机制",
+      "如需 Word，写入 output/office-supplies-policy/"
+    ],
+    "guardrails": [
+      "预算、审批金额等未提供时使用占位符",
+      "注明“建议稿，请结合公司现行制度发布”"
+    ]
+  }
+]

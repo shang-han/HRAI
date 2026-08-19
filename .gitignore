@@ -1,0 +1,30 @@
+node_modules/
+dist/
+dist-electron/
+release/
+*.log
+
+# 数据目录（运行时生成）
+data/
+log/
+
+# 环境
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+resources/hermes/python/
+resources/hermes/site-packages/
+
+# 内置 Git Bash（便携部署环境）
+resources/hermes/git/
+
+# IDE
+.vscode/
+.idea/

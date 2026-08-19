@@ -1,0 +1,94 @@
+{
+  "name": "hermes-hr-admin",
+  "version": "1.0.0",
+  "description": "Hermes 人事行政一体化智能专家",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:main": "node build-main.mjs",
+    "build:renderer": "vite build",
+    "build": "node build-main.mjs && vite build",
+    "electron:dev": "node build-main.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "node build-main.mjs && vite build && electron-builder"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.5.0",
+    "@larksuiteoapi/node-sdk": "^1.73.0",
+    "antd": "^5.22.0",
+    "dingtalk-stream": "^2.1.6-beta.1",
+    "docx": "^9.0.0",
+    "electron-store": "^10.0.0",
+    "exceljs": "^4.4.0",
+    "html2canvas": "^1.4.1",
+    "node-machine-id": "^1.1.12",
+    "pptxgenjs": "^3.12.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "rehype-highlight": "^7.0.1",
+    "remark-gfm": "^4.0.0",
+    "systeminformation": "^5.23.0",
+    "winston": "^3.17.0",
+    "ws": "^8.21.3",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.28.2",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.hermes.hr-admin",
+    "productName": "Hermes人事行政智能专家",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "resources/**/*",
+      "!resources/hermes/python/**/*",
+      "!resources/hermes/site-packages/**/*",
+      "!resources/hermes/git/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/hermes",
+        "to": "hermes",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Hermes人事行政智能专家"
+    }
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true,
+    "electron@28.3.3": true
+  }
+}
