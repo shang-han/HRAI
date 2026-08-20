@@ -68,11 +68,23 @@ const TopBar: React.FC = () => {
   const [announcementContent, setAnnouncementContent] = useState('')
   const [hasNewAnnouncement, setHasNewAnnouncement] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [permissionMode, setPermissionMode] = useState<'ask' | 'auto' | 'readonly'>('ask')
+  const [permissionRequest, setPermissionRequest] = useState<any>(null)
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
 
   useEffect(() => {
     checkAnnouncement()
+    // 读取当前权限模式
+    window.electronAPI.config.get().then((cfg: any) => {
+      if (cfg?.permissionMode) setPermissionMode(cfg.permissionMode)
+    }).catch(() => {})
+
+    // 监听 Hermes ACP 审批请求（仅 ask 模式会收到）
+    const offPermission = window.electronAPI.permission.onRequest((data) => {
+      setPermissionRequest(data)
+    })
+    return () => offPermission()
   }, [])
 
   const checkAnnouncement = async () => {
@@ -175,6 +187,27 @@ const TopBar: React.FC = () => {
           </div>
           <Divider />
           <div>
+            <h3 className="font-medium mb-2">权限模式（Codex 风格）</h3>
+            <Radio.Group
+              value={permissionMode}
+              onChange={e => {
+                const value = e.target.value as 'ask' | 'auto' | 'readonly'
+                setPermissionMode(value)
+                window.electronAPI.config.set('permissionMode', value).catch(() => {})
+              }}
+            >
+              <Radio.Button value="ask">审批模式</Radio.Button>
+              <Radio.Button value="auto">完全放开</Radio.Button>
+              <Radio.Button value="readonly">只读保护</Radio.Button>
+            </Radio.Group>
+            <div className="text-xs text-gray-500 mt-2 space-y-1">
+              <p>· 审批模式：删除、覆写、执行命令等高风险操作前弹窗确认（推荐）</p>
+              <p>· 完全放开：所有操作自动允许，不再询问</p>
+              <p>· 只读保护：拒绝所有写/删/执行类权限请求，仅允许读取</p>
+            </div>
+          </div>
+          <Divider />
+          <div>
             <h3 className="font-medium mb-2 text-red-500">退出程序</h3>
             <p className="text-xs text-gray-500 mb-3">
               关闭窗口只会将程序最小化到系统托盘并保持服务运行。退出将停止 Hermes 服务与全部渠道 Bot。
@@ -189,6 +222,33 @@ const TopBar: React.FC = () => {
           </div>
         </div>
       </Drawer>
+
+      {/* Hermes 权限审批弹窗 */}
+      <Modal
+        title="Hermes 请求执行权限"
+        open={!!permissionRequest}
+        onOk={() => {
+          if (permissionRequest) window.electronAPI.permission.respond(permissionRequest.requestId, true)
+          setPermissionRequest(null)
+        }}
+        onCancel={() => {
+          if (permissionRequest) window.electronAPI.permission.respond(permissionRequest.requestId, false)
+          setPermissionRequest(null)
+        }}
+        okText="允许一次"
+        cancelText="拒绝"
+        okButtonProps={{ danger: true }}
+      >
+        <p className="text-sm text-gray-700 dark:text-gray-200 font-medium mb-2">
+          {permissionRequest?.title || '高风险操作'}
+        </p>
+        <div className="text-xs text-gray-500 mb-2">{permissionRequest?.description}</div>
+        {permissionRequest?.command && (
+          <div className="rounded bg-slate-100 dark:bg-gray-900 border border-slate-200 dark:border-gray-700 p-3 font-mono text-xs break-all whitespace-pre-wrap">
+            {permissionRequest.command}
+          </div>
+        )}
+      </Modal>
 
       {/* 公告弹窗 */}
       <Modal title="系统公告" open={announcementOpen} onOk={() => setAnnouncementOpen(false)} onCancel={() => setAnnouncementOpen(false)} footer={null}>

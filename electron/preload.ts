@@ -110,6 +110,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // 权限审批模块
+  permission: {
+    onRequest: (callback: (data: any) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('permission:request', listener)
+      return () => ipcRenderer.removeListener('permission:request', listener)
+    },
+    respond: (requestId: number, allow: boolean) => ipcRenderer.invoke('permission:respond', requestId, allow),
+  },
+
   // 应用生命周期模块
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
@@ -178,6 +188,10 @@ export interface ElectronAPI {
   }
   app: {
     quit: () => Promise<any>
+  }
+  permission: {
+    onRequest: (callback: (data: any) => void) => () => void
+    respond: (requestId: number, allow: boolean) => Promise<any>
   }
   company: {
     status: () => Promise<any>

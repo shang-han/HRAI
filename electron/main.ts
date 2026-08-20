@@ -26,6 +26,8 @@ let closeToTrayHintShown = false
 
 // 渲染端会话 -> Hermes ACP 会话 映射
 const hermesSessions = new Map<string, string>()
+// ACP 审批请求 -> Promise resolve
+const pendingApprovals = new Map<number, (allow: boolean) => void>()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -115,6 +117,22 @@ async function initializeApp() {
 
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
+
+  // 权限模式桥接：ask 模式下把 ACP 审批请求转发给前端弹窗
+  hermesManager.setPermissionBridge({
+    getMode: () => (storageManager.getConfig() as any)?.permissionMode || 'ask',
+    requestApproval: (payload) => new Promise((resolve) => {
+      pendingApprovals.set(payload.requestId, resolve)
+      // 防止窗口未打开时审批挂死：5 分钟后自动拒绝
+      setTimeout(() => {
+        if (pendingApprovals.has(payload.requestId)) {
+          pendingApprovals.delete(payload.requestId)
+          resolve(false)
+        }
+      }, 5 * 60 * 1000)
+      mainWindow?.webContents.send('permission:request', payload)
+    })
+  })
 
 
   // 初始化渠道接入管理器（微信/企微/钉钉/飞书）
@@ -505,6 +523,16 @@ function registerIpcHandlers() {
 
   ipcMain.handle('channel:scanPoll', async (_event, channel: 'weixin' | 'wecom' | 'dingtalk' | 'feishu', session: string) => {
     return channelManager.scanPoll(channel, session)
+  })
+
+  // ============ 权限审批模块 ============
+  ipcMain.handle('permission:respond', async (_event, requestId: number, allow: boolean) => {
+    const resolve = pendingApprovals.get(requestId)
+    if (resolve) {
+      pendingApprovals.delete(requestId)
+      resolve(allow)
+    }
+    return true
   })
 
   // ============ 应用生命周期模块 ============

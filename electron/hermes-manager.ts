@@ -18,6 +18,19 @@ interface StreamHandler {
   onError: (error: string) => void
 }
 
+export interface HermesPermissionBridge {
+  /** 当前权限模式：ask=高危审批 / auto=完全放开 / readonly=只读保护 */
+  getMode: () => 'ask' | 'auto' | 'readonly'
+  /** ask 模式下把审批请求转发给前端，返回是否允许 */
+  requestApproval: (payload: {
+    requestId: number
+    title: string
+    command: string
+    description: string
+    rawInput: any
+  }) => Promise<boolean>
+}
+
 export class HermesManager {
   private process: ChildProcess | null = null
   private logManager: any
@@ -33,6 +46,8 @@ export class HermesManager {
   private availableCommands: any[] = []
   /** 每个 ACP 会话的串行队列，防止并发 prompt 触发 Hermes 的 active-turn redirect */
   private sessionQueues = new Map<string, Promise<void>>()
+  private permissionBridge: HermesPermissionBridge | null = null
+  private pendingPermissions = new Map<number, (allow: boolean) => void>()
   private gatewayProcess: ChildProcess | null = null
   private gatewayStarting: Promise<void> | null = null
   private channelSyncProcess: ChildProcess | null = null
@@ -74,6 +89,18 @@ export class HermesManager {
   }
 
   get isRunning() { return this._isRunning }
+
+  setPermissionBridge(bridge: HermesPermissionBridge): void {
+    this.permissionBridge = bridge
+  }
+
+  /** 前端对审批请求的响应入口 */
+  resolvePermission(requestId: number, allow: boolean): void {
+    const resolve = this.pendingPermissions.get(requestId)
+    if (!resolve) return
+    this.pendingPermissions.delete(requestId)
+    resolve(allow)
+  }
 
   async start(): Promise<void> {
     if (this._isRunning) return
@@ -392,15 +419,7 @@ export class HermesManager {
       }
 
       if (msg.method === 'session/request_permission') {
-        // 桌面端暂无审批弹窗，本地可信环境自动允许一次。
-        // 后续如需人工审批，可在这里转发 IPC 弹窗后再回复。
-        this.logManager?.info(`[ACP] 自动批准权限请求 id=${msg.id}`)
-        this.sendJsonResponse(msg.id, {
-          outcome: {
-            outcome: 'selected',
-            optionId: 'allow_once'
-          }
-        })
+        this.handlePermissionRequest(msg)
       } else {
         this.logManager?.warn(`[ACP] 未处理的客户端请求: ${msg.method} id=${msg.id}`)
       }
@@ -411,6 +430,66 @@ export class HermesManager {
     if (msg.method) {
       this.handleStreamNotification(msg.method, msg.params)
     }
+  }
+
+  /**
+   * Codex 风格权限模式：
+   * - ask：发送到前端弹窗，等待用户允许/拒绝
+   * - auto：全部自动允许
+   * - readonly：写/删类高危请求直接拒绝（读取不会发权限请求）
+   */
+  private handlePermissionRequest(msg: any): void {
+    const requestId = Number(msg.id)
+    const mode = this.permissionBridge?.getMode?.() || 'ask'
+
+    if (mode === 'auto') {
+      this.logManager?.info(`[ACP] 权限模式 auto：自动批准请求 id=${requestId}`)
+      this.answerPermission(requestId, true)
+      return
+    }
+
+    if (mode === 'readonly') {
+      this.logManager?.info(`[ACP] 权限模式 readonly：拒绝高危请求 id=${requestId}`)
+      this.answerPermission(requestId, false)
+      return
+    }
+
+    // ask 模式：把审批请求转发给渲染进程
+    const params = msg.params || {}
+    const toolCall = params.toolCall || params.tool_call || {}
+    const rawInput = toolCall.rawInput || toolCall.raw_input || {}
+    const content = Array.isArray(toolCall.content)
+      ? toolCall.content.map((c: any) => c.text || c.content || '').join(String.fromCharCode(10))
+      : (toolCall.content || '')
+    const title = String(toolCall.title || toolCall.kind || 'Hermes 权限请求')
+    const command = String(rawInput.command || rawInput.path || content || '')
+
+    const payload = {
+      requestId,
+      title,
+      command,
+      description: String(content || title),
+      rawInput
+    }
+
+    const bridge = this.permissionBridge
+    if (!bridge) {
+      this.answerPermission(requestId, false)
+      return
+    }
+
+    bridge.requestApproval(payload)
+      .then(allow => this.answerPermission(requestId, allow))
+      .catch(() => this.answerPermission(requestId, false))
+  }
+
+  private answerPermission(requestId: number, allow: boolean): void {
+    if (!this.process?.stdin?.writable) return
+    const result = allow
+      ? { outcome: { outcome: 'selected', optionId: 'allow_once' } }
+      : { outcome: { outcome: 'cancelled' } }
+    this.sendJsonResponse(requestId, result)
+    this.logManager?.info(`[ACP] 权限请求 ${requestId} -> ${allow ? '允许' : '拒绝'}`)
   }
 
   private sendJsonResponse(id: number, result: any): void {

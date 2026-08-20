@@ -36,6 +36,8 @@ interface WorkPriority {
 
 interface AppConfig {
   theme: 'light' | 'dark'
+  /** 权限模式：ask=高危操作审批 | auto=完全放开 | readonly=只读保护 */
+  permissionMode: 'ask' | 'auto' | 'readonly'
   modelConfig: {
     dialogue: ModelProvider[]
     image: ModelProvider[]
@@ -476,6 +478,7 @@ export class StorageManager {
   private getDefaultConfig(): AppConfig {
     return {
       theme: 'light',
+      permissionMode: 'ask',
       modelConfig: {
         dialogue: [
           {

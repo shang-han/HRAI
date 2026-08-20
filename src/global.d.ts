@@ -75,6 +75,10 @@ declare global {
       app: {
         quit: () => Promise<{ confirmed: boolean }>
       }
+      permission: {
+        onRequest: (callback: (data: { requestId: number; title: string; command: string; description: string }) => void) => () => void
+        respond: (requestId: number, allow: boolean) => Promise<boolean>
+      }
       company: {
         status: () => Promise<{ completed: boolean; profile?: any; knowledge?: any }>
         saveAnswers: (answers: Record<string, string>) => Promise<{ success: boolean }>
