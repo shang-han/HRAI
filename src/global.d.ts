@@ -81,9 +81,9 @@ declare global {
         respond: (requestId: number, allow: boolean) => Promise<boolean>
       }
       update: {
-        check: () => Promise<{ hasUpdate: boolean; latestVersion: string; currentVersion: string; releaseNotes: string; downloadUrl: string; fileName: string; size: number; publishedAt: string }>
-        download: () => Promise<string>
-        install: (filePath: string) => Promise<void>
+        check: () => Promise<{ hasUpdate: boolean; latestVersion: string; currentVersion: string; releaseNotes: string; downloadUrl: string; fileName: string; size: number; publishedAt: string; updateType: 'incremental' | 'full'; deltaUrl: string; deltaFileName: string; deltaSize: number }>
+        download: () => Promise<{ filePath: string; updateType: 'incremental' | 'full' }>
+        install: (filePath: string, updateType: 'incremental' | 'full') => Promise<void>
         cancel: () => Promise<boolean>
         onProgress: (callback: (data: { total: number; downloaded: number; percent: number; filePath: string }) => void) => () => void
       }

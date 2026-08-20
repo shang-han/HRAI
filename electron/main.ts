@@ -542,8 +542,8 @@ function registerIpcHandlers() {
     return giteeUpdater.downloadLatest()
   })
 
-  ipcMain.handle('update:install', async (_event, filePath: string) => {
-    return giteeUpdater.install(filePath)
+  ipcMain.handle('update:install', async (_event, filePath: string, updateType: 'incremental' | 'full') => {
+    return giteeUpdater.install(filePath, updateType || 'full')
   })
 
   ipcMain.handle('update:cancel', async () => {

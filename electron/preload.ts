@@ -114,7 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   update: {
     check: () => ipcRenderer.invoke('update:check'),
     download: () => ipcRenderer.invoke('update:download'),
-    install: (filePath: string) => ipcRenderer.invoke('update:install', filePath),
+    install: (filePath: string, updateType: string) => ipcRenderer.invoke('update:install', filePath, updateType),
     cancel: () => ipcRenderer.invoke('update:cancel'),
     onProgress: (callback: (data: any) => void) => {
       const listener = (_event: any, data: any) => callback(data)
@@ -207,7 +207,7 @@ export interface ElectronAPI {
   update: {
     check: () => Promise<any>
     download: () => Promise<any>
-    install: (filePath: string) => Promise<any>
+    install: (filePath: string, updateType: string) => Promise<any>
     cancel: () => Promise<any>
     onProgress: (callback: (data: any) => void) => () => void
   }

@@ -9,11 +9,13 @@
     "build:renderer": "vite build",
     "build": "node build-main.mjs && vite build",
     "electron:dev": "node build-main.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "node build-main.mjs && vite build && electron-builder"
+    "electron:build": "node build-main.mjs && vite build && electron-builder",
+    "make:delta": "node scripts/make-delta-package.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.0",
     "@larksuiteoapi/node-sdk": "^1.73.0",
+    "adm-zip": "^0.6.0",
     "antd": "^5.22.0",
     "dingtalk-stream": "^2.1.6-beta.1",
     "docx": "^9.0.0",
@@ -34,6 +36,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

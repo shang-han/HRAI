@@ -129,9 +129,9 @@ const TopBar: React.FC = () => {
     setUpdateBusy(true)
     setUpdateProgress(null)
     try {
-      const filePath = await window.electronAPI.update.download()
-      setUpdateInfo((prev: any) => ({ ...prev, downloadedPath: filePath }))
-      message.success('更新包下载完成')
+      const result = await window.electronAPI.update.download()
+      setUpdateInfo((prev: any) => ({ ...prev, downloadedPath: result.filePath, updateType: result.updateType }))
+      message.success(result.updateType === 'incremental' ? '增量更新包下载完成' : '全量更新包下载完成')
     } catch (err: any) {
       message.error(err?.message || '下载失败')
     } finally {
@@ -143,7 +143,7 @@ const TopBar: React.FC = () => {
     if (!updateInfo?.downloadedPath) return
     setUpdateBusy(true)
     try {
-      await window.electronAPI.update.install(updateInfo.downloadedPath)
+      await window.electronAPI.update.install(updateInfo.downloadedPath, updateInfo.updateType || 'full')
       setUpdateModalOpen(false)
       message.success('已打开安装程序，请按提示完成升级')
     } catch (err: any) {
@@ -332,6 +332,9 @@ const TopBar: React.FC = () => {
           <div className="space-y-3">
             <p>当前版本：<strong>{updateInfo.currentVersion}</strong></p>
             <p>最新版本：<strong>{updateInfo.hasUpdate ? updateInfo.latestVersion : '已是最新'}</strong></p>
+            {updateInfo.hasUpdate && (
+              <p>更新策略：<strong>{updateInfo.updateType === 'incremental' ? '增量更新（小改动）' : '全量更新（大改动）'}</strong></p>
+            )}
             {updateInfo.hasUpdate && updateInfo.releaseNotes && (
               <div className="text-xs text-gray-500 whitespace-pre-wrap max-h-40 overflow-auto bg-slate-50 dark:bg-gray-900 p-2 rounded">
                 {updateInfo.releaseNotes}
