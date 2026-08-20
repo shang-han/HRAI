@@ -117,18 +117,25 @@ export class ModelRouter {
           Accept: 'application/json'
         }
       }, (res) => {
-        if (res.statusCode && res.statusCode >= 400) {
-          res.resume()
-          reject(new Error(`HTTP ${res.statusCode}：该接口可能不支持模型列表查询`))
-          return
-        }
         const chunks: Buffer[] = []
         res.on('data', (c: Buffer) => chunks.push(c))
         res.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf-8')
+          if (res.statusCode && res.statusCode >= 400) {
+            let detail = ''
+            try {
+              const parsed = JSON.parse(body)
+              detail = parsed?.error?.message || parsed?.message || body.slice(0, 200)
+            } catch {
+              detail = body.slice(0, 200)
+            }
+            reject(new Error(`HTTP ${res.statusCode}：${detail || '该接口可能不支持模型列表查询'}`))
+            return
+          }
           try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
+            resolve(JSON.parse(body))
           } catch {
-            reject(new Error('模型列表响应不是有效 JSON'))
+            reject(new Error(`模型列表响应不是有效 JSON：${body.slice(0, 160)}`))
           }
         })
       })

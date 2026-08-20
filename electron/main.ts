@@ -359,7 +359,14 @@ function registerIpcHandlers() {
 
   // 从 API 获取可用模型列表
   ipcMain.handle('model:list', async (_event, provider: any) => {
-    return modelRouter.listModels(provider)
+    try {
+      const result = await modelRouter.listModels(provider)
+      logManager.info(`model:list ${provider?.id || provider?.modelName || ''} -> ${result.success ? (result.models?.length || 0) + ' models' : result.message}`)
+      return result
+    } catch (err: any) {
+      logManager.error('model:list handler error', err)
+      return { success: false, message: `获取模型列表失败: ${err?.message || err}` }
+    }
   })
 
   // ============ 配置模块 ============
