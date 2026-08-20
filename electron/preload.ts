@@ -110,6 +110,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // 在线升级模块
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: (filePath: string, updateType: string) => ipcRenderer.invoke('update:install', filePath, updateType),
+    cancel: () => ipcRenderer.invoke('update:cancel'),
+    onProgress: (callback: (data: any) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('update:progress', listener)
+      return () => ipcRenderer.removeListener('update:progress', listener)
+    },
+  },
+
+  // 权限审批模块
+  permission: {
+    onRequest: (callback: (data: any) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('permission:request', listener)
+      return () => ipcRenderer.removeListener('permission:request', listener)
+    },
+    respond: (requestId: number, allow: boolean) => ipcRenderer.invoke('permission:respond', requestId, allow),
+  },
+
   // 应用生命周期模块
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
@@ -126,6 +149,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('app:maximizedChanged', listener)
       return () => ipcRenderer.removeListener('app:maximizedChanged', listener)
     },
+    version: () => ipcRenderer.invoke('app:version'),
   },
 })
 
@@ -199,6 +223,18 @@ export interface ElectronAPI {
     about: () => Promise<void>
     isMaximized: () => Promise<boolean>
     onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
+    version: () => Promise<string>
+  }
+  update: {
+    check: () => Promise<any>
+    download: () => Promise<any>
+    install: (filePath: string, updateType: string) => Promise<any>
+    cancel: () => Promise<any>
+    onProgress: (callback: (data: any) => void) => () => void
+  }
+  permission: {
+    onRequest: (callback: (data: any) => void) => () => void
+    respond: (requestId: number, allow: boolean) => Promise<any>
   }
   company: {
     status: () => Promise<any>

@@ -25,5 +25,5 @@
 
 ## 技能使用
 
-- 优先使用已启用的 SKILL.md 技能（如 docx、xlsx、pdf、powerpoint）。
+- 优先使用已启用的 SKILL.md 技能：HR 文档任务先加载 `hr-doc-generation`，文件生成使用 docx、xlsx、pdf、powerpoint。
 - 技能不可用时，使用 Python 脚本或手工方式完成同等任务，并在回复中说明采用的方式。

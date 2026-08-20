@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, ChildProcess, exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
@@ -18,6 +18,19 @@ interface StreamHandler {
   onError: (error: string) => void
 }
 
+export interface HermesPermissionBridge {
+  /** 当前权限模式：ask=高危审批 / auto=完全放开 / readonly=只读保护 */
+  getMode: () => 'ask' | 'auto' | 'readonly'
+  /** ask 模式下把审批请求转发给前端，返回是否允许 */
+  requestApproval: (payload: {
+    requestId: number
+    title: string
+    command: string
+    description: string
+    rawInput: any
+  }) => Promise<boolean>
+}
+
 export class HermesManager {
   private process: ChildProcess | null = null
   private logManager: any
@@ -33,6 +46,8 @@ export class HermesManager {
   private availableCommands: any[] = []
   /** 每个 ACP 会话的串行队列，防止并发 prompt 触发 Hermes 的 active-turn redirect */
   private sessionQueues = new Map<string, Promise<void>>()
+  private permissionBridge: HermesPermissionBridge | null = null
+  private pendingPermissions = new Map<number, (allow: boolean) => void>()
   private gatewayProcess: ChildProcess | null = null
   private gatewayStarting: Promise<void> | null = null
   private channelSyncProcess: ChildProcess | null = null
@@ -74,6 +89,56 @@ export class HermesManager {
   }
 
   get isRunning() { return this._isRunning }
+
+  /**
+   * 清理旧版本遗留的 Hermes gateway / channel_sync 进程。
+   * 当前架构下微信/企微由 Electron 连接器直连，任何残留 gateway
+   * 都会造成同一渠道双通道抢消息。
+   */
+  async killLegacyGatewayProcesses(): Promise<void> {
+    if (process.platform !== 'win32') return
+
+    try {
+      const { stdout } = await this.execAsync(
+        "wmic process where \"name='python.exe'\" get ProcessId,CommandLine",
+        { windowsHide: true }
+      )
+      for (const rawLine of (stdout || '').split(String.fromCharCode(10))) {
+        const line = rawLine.trim()
+        if (!line || !/gateway\.run|channel_sync\.py/i.test(line)) continue
+        // 只清理本应用相关进程，避免误杀其他项目的 Hermes
+        if (!/hermes-hr-admin|resources.*hermes.*python/i.test(line)) continue
+        const parts = line.split(/\s+/)
+        const pid = Number(parts[parts.length - 1])
+        if (!Number.isInteger(pid) || pid <= 0) continue
+        try {
+          process.kill(pid, 'SIGKILL')
+          this.logManager?.info(`已清理旧版 Hermes gateway/channel_sync 进程: ${pid}`)
+        } catch { /* ignore */ }
+      }
+    } catch { /* 没有残留进程或清理失败都不影响启动 */ }
+  }
+
+  private execAsync(cmd: string, options: any): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      exec(cmd, { encoding: 'utf-8', ...options }, (error, stdout, stderr) => {
+        if (error) reject(error)
+        else resolve({ stdout: String(stdout), stderr: String(stderr) })
+      })
+    })
+  }
+
+  setPermissionBridge(bridge: HermesPermissionBridge): void {
+    this.permissionBridge = bridge
+  }
+
+  /** 前端对审批请求的响应入口 */
+  resolvePermission(requestId: number, allow: boolean): void {
+    const resolve = this.pendingPermissions.get(requestId)
+    if (!resolve) return
+    this.pendingPermissions.delete(requestId)
+    resolve(allow)
+  }
 
   async start(): Promise<void> {
     if (this._isRunning) return
@@ -266,13 +331,18 @@ export class HermesManager {
     const content = [{ type: 'text', text }]
     const promptPromise = (async () => {
       try {
-        // 智能体一轮可能包含多次工具调用，超时放宽到 10 分钟
+        // 智能体一轮可能包含多次工具调用；超时 4 分钟足够长，
+        // 超时后主动取消 ACP 会话，避免下一轮被 Hermes 当作 active-turn redirect。
         await this.sendAcpRequest('session/prompt', {
           prompt: content,
           sessionId
-        }, 600000)
+        }, 240000)
         handler.onDone()
       } catch (err: any) {
+        await this.cancelSession(sessionId).catch(() => {})
+        // 留出短暂时间让 ACP 清理 running 状态，防止紧跟的新消息触发
+        // “Redirected the active turn with your correction.”
+        await new Promise(resolve => setTimeout(resolve, 1500))
         handler.onError(err.message)
       } finally {
         this.streamHandler = null
@@ -294,6 +364,20 @@ export class HermesManager {
       if (this.sessionQueues.get(sessionId) === promptPromise) {
         this.sessionQueues.delete(sessionId)
       }
+    }
+  }
+
+  /**
+   * 主动取消指定 ACP 会话的当前回合。
+   */
+  async cancelSession(sessionId: string): Promise<void> {
+    if (this.process?.stdin?.writable && sessionId) {
+      const req = {
+        jsonrpc: '2.0',
+        method: 'session/cancel',
+        params: { sessionId }
+      }
+      this.process.stdin.write(JSON.stringify(req) + String.fromCharCode(10))
     }
   }
 
@@ -327,7 +411,7 @@ export class HermesManager {
         method: 'session/cancel',
         params: { sessionId }
       }
-      this.process.stdin.write(JSON.stringify(req) + '\n')
+      this.process.stdin.write(JSON.stringify(req) + String.fromCharCode(10))
     }
     this.streamHandler = null
   }
@@ -345,7 +429,7 @@ export class HermesManager {
       const req = { jsonrpc: '2.0', id, method, params }
       this.pendingRequests.set(id, { resolve, reject })
 
-      this.process!.stdin.write(JSON.stringify(req) + '\n')
+      this.process.stdin.write(JSON.stringify(req) + String.fromCharCode(10))
 
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
@@ -357,7 +441,8 @@ export class HermesManager {
   }
 
   private handleMessage(msg: any): void {
-    // 响应
+    // 1. 带 id 的消息：优先按我们自己发出的请求响应处理；
+    //    JSON-RPC 响应没有 method 字段，所以这里不能依赖 method。
     if (msg.id !== undefined) {
       const pending = this.pendingRequests.get(msg.id)
       if (pending) {
@@ -367,14 +452,89 @@ export class HermesManager {
         } else {
           pending.resolve(msg.result)
         }
+        return
+      }
+
+      // 2. 不是我们的待响应请求，则可能是 agent 发来的客户端请求。
+      //    当前最重要的是审批：Hermes 执行 terminal/write_file 等危险操作前会发
+      //    session/request_permission，若客户端不回应，agent 会一直等到审批超时。
+      if (msg.method === 'session/request_permission') {
+        this.handlePermissionRequest(msg)
+      } else if (msg.method) {
+        this.logManager?.warn(`[ACP] 未处理的客户端请求: ${msg.method} id=${msg.id}`)
       }
       return
     }
 
-    // 通知（流式数据）
+    // 3. 通知（流式数据）
     if (msg.method) {
       this.handleStreamNotification(msg.method, msg.params)
     }
+  }
+
+  /**
+   * Codex 风格权限模式：
+   * - ask：发送到前端弹窗，等待用户允许/拒绝
+   * - auto：全部自动允许
+   * - readonly：写/删类高危请求直接拒绝（读取不会发权限请求）
+   */
+  private handlePermissionRequest(msg: any): void {
+    const requestId = Number(msg.id)
+    const mode = this.permissionBridge?.getMode?.() || 'ask'
+
+    if (mode === 'auto') {
+      this.logManager?.info(`[ACP] 权限模式 auto：自动批准请求 id=${requestId}`)
+      this.answerPermission(requestId, true)
+      return
+    }
+
+    if (mode === 'readonly') {
+      this.logManager?.info(`[ACP] 权限模式 readonly：拒绝高危请求 id=${requestId}`)
+      this.answerPermission(requestId, false)
+      return
+    }
+
+    // ask 模式：把审批请求转发给渲染进程
+    const params = msg.params || {}
+    const toolCall = params.toolCall || params.tool_call || {}
+    const rawInput = toolCall.rawInput || toolCall.raw_input || {}
+    const content = Array.isArray(toolCall.content)
+      ? toolCall.content.map((c: any) => c.text || c.content || '').join(String.fromCharCode(10))
+      : (toolCall.content || '')
+    const title = String(toolCall.title || toolCall.kind || 'Hermes 权限请求')
+    const command = String(rawInput.command || rawInput.path || content || '')
+
+    const payload = {
+      requestId,
+      title,
+      command,
+      description: String(content || title),
+      rawInput
+    }
+
+    const bridge = this.permissionBridge
+    if (!bridge) {
+      this.answerPermission(requestId, false)
+      return
+    }
+
+    bridge.requestApproval(payload)
+      .then(allow => this.answerPermission(requestId, allow))
+      .catch(() => this.answerPermission(requestId, false))
+  }
+
+  private answerPermission(requestId: number, allow: boolean): void {
+    if (!this.process?.stdin?.writable) return
+    const result = allow
+      ? { outcome: { outcome: 'selected', optionId: 'allow_once' } }
+      : { outcome: { outcome: 'cancelled' } }
+    this.sendJsonResponse(requestId, result)
+    this.logManager?.info(`[ACP] 权限请求 ${requestId} -> ${allow ? '允许' : '拒绝'}`)
+  }
+
+  private sendJsonResponse(id: number, result: any): void {
+    if (!this.process?.stdin?.writable) return
+    this.process.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + String.fromCharCode(10))
   }
 
   private handleStreamNotification(method: string, params: any): void {
@@ -745,7 +905,10 @@ export class HermesManager {
 
     let yaml = ''
     if (primaryModel) {
-      const maxTokens = Number(primaryModel.params?.max_tokens) || 16384
+      // 去掉旧配置的低上限：任何低于 65536 的 max_tokens 都提升到 65536，
+      // 只有用户明确设置更高值时保留更高值。
+      const savedMax = Number(primaryModel.params?.max_tokens) || 0
+      const maxTokens = savedMax > 65536 ? savedMax : 65536
       yaml = `model:
   default: "${this.escapeYaml(primaryModel.modelName)}"
   provider: "${this.getProviderName(primaryModel.id)}"

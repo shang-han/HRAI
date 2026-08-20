@@ -40,8 +40,8 @@ interface ConfigState {
 // 预设模型列表（apiKey/enabled 由 defaultModelConfig 填充）
 const MODEL_PRESETS: Array<Omit<ModelProvider, 'apiKey' | 'enabled'>> = [
   // 对话模型
-  { id: 'deepseek-chat', name: 'DeepSeek', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', modelName: 'deepseek-chat', params: { temperature: 0.7, max_tokens: 16384 } },
-  { id: 'deepseek-reasoner', name: 'DeepSeek R1', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', modelName: 'deepseek-reasoner', params: { temperature: 0.7, max_tokens: 16384 } },
+  { id: 'deepseek-chat', name: 'DeepSeek', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', modelName: 'deepseek-chat', params: { temperature: 0.7, max_tokens: 65536 } },
+  { id: 'deepseek-reasoner', name: 'DeepSeek R1', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', modelName: 'deepseek-reasoner', params: { temperature: 0.7, max_tokens: 65536 } },
   { id: 'qwen-turbo', name: '通义千问 Turbo', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', modelName: 'qwen-turbo', params: { temperature: 0.7 } },
   { id: 'qwen-plus', name: '通义千问 Plus', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', modelName: 'qwen-plus', params: { temperature: 0.7 } },
   { id: 'qwen-max', name: '通义千问 Max', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', modelName: 'qwen-max', params: { temperature: 0.7 } },

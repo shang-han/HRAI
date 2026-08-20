@@ -9,6 +9,7 @@ import { FileEngine } from './file-engine'
 import { LogManager } from './log-manager'
 import { IntentRouter, IntentMeta } from './intent-router'
 import { ChannelManager } from './channel-engine/channel-manager'
+import { GiteeUpdater } from './gitee-updater'
 import { ChannelId } from './channel-engine/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -20,12 +21,15 @@ let fileEngine: FileEngine
 let logManager: LogManager
 let intentRouter: IntentRouter
 let channelManager: ChannelManager
+let giteeUpdater: GiteeUpdater
 let tray: Tray | null = null
 let isQuitting = false
 let closeToTrayHintShown = false
 
 // 渲染端会话 -> Hermes ACP 会话 映射
 const hermesSessions = new Map<string, string>()
+// ACP 审批请求 -> Promise resolve
+const pendingApprovals = new Map<number, (allow: boolean) => void>()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -123,6 +127,33 @@ async function initializeApp() {
 
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
+
+  // 清理旧版本遗留的 gateway/channel_sync 进程，避免微信/企微双通道抢消息
+  await hermesManager.killLegacyGatewayProcesses().catch((err: any) => {
+    logManager.debug(`旧进程清理跳过: ${err.message}`)
+  })
+
+  // 初始化 Gitee 在线升级
+  giteeUpdater = new GiteeUpdater(() => (storageManager.getConfig() as any)?.update || { owner: '', repo: '' })
+  giteeUpdater.setProgressHandler((state) => {
+    mainWindow?.webContents.send('update:progress', state)
+  })
+
+  // 权限模式桥接：ask 模式下把 ACP 审批请求转发给前端弹窗
+  hermesManager.setPermissionBridge({
+    getMode: () => (storageManager.getConfig() as any)?.permissionMode || 'ask',
+    requestApproval: (payload) => new Promise((resolve) => {
+      pendingApprovals.set(payload.requestId, resolve)
+      // 防止窗口未打开时审批挂死：5 分钟后自动拒绝
+      setTimeout(() => {
+        if (pendingApprovals.has(payload.requestId)) {
+          pendingApprovals.delete(payload.requestId)
+          resolve(false)
+        }
+      }, 5 * 60 * 1000)
+      mainWindow?.webContents.send('permission:request', payload)
+    })
+  })
 
 
   // 初始化渠道接入管理器（微信/企微/钉钉/飞书）
@@ -342,7 +373,14 @@ function registerIpcHandlers() {
 
   // 从 API 获取可用模型列表
   ipcMain.handle('model:list', async (_event, provider: any) => {
-    return modelRouter.listModels(provider)
+    try {
+      const result = await modelRouter.listModels(provider)
+      logManager.info(`model:list ${provider?.id || provider?.modelName || ''} -> ${result.success ? (result.models?.length || 0) + ' models' : result.message}`)
+      return result
+    } catch (err: any) {
+      logManager.error('model:list handler error', err)
+      return { success: false, message: `获取模型列表失败: ${err?.message || err}` }
+    }
   })
 
   // ============ 配置模块 ============
@@ -516,7 +554,40 @@ function registerIpcHandlers() {
     return channelManager.scanPoll(channel, session)
   })
 
+  // ============ 在线升级模块 ============
+  ipcMain.handle('update:check', async () => {
+    return giteeUpdater.checkForUpdates()
+  })
+
+  ipcMain.handle('update:download', async () => {
+    return giteeUpdater.downloadLatest()
+  })
+
+  ipcMain.handle('update:install', async (_event, filePath: string, updateType: 'incremental' | 'full') => {
+    return giteeUpdater.install(filePath, updateType || 'full')
+  })
+
+  ipcMain.handle('update:cancel', async () => {
+    giteeUpdater.cancelDownload()
+    return true
+  })
+
+  // ============ 权限审批模块 ============
+  ipcMain.handle('permission:respond', async (_event, requestId: number, allow: boolean) => {
+    const resolve = pendingApprovals.get(requestId)
+    if (resolve) {
+      pendingApprovals.delete(requestId)
+      resolve(allow)
+    }
+    return true
+  })
+
   // ============ 应用生命周期模块 ============
+  ipcMain.handle('app:version', async () => {
+    return app.getVersion()
+  })
+
+  // 渲染进程可发起显式退出，主进程统一弹确认框并停止服务
   // 渲染进程可发起显式退出，主进程统一弹确认框并停止服务
   ipcMain.handle('app:quit', async () => {
     return requestQuit()

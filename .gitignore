@@ -38,3 +38,4 @@ workspace/data/
 workspace/templates/
 workspace/company_context.json
  (Initial commit: Hermes HR admin desktop app source)
+/main.js

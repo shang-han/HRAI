@@ -38,6 +38,12 @@ interface WorkPriority {
 
 interface AppConfig {
   theme: 'light' | 'dark'
+  /** 权限模式：ask=高危操作审批 | auto=完全放开 | readonly=只读保护 */
+  permissionMode: 'ask' | 'auto' | 'readonly'
+  update: {
+    owner: string
+    repo: string
+  }
   modelConfig: {
     dialogue: ModelProvider[]
     image: ModelProvider[]
@@ -123,6 +129,8 @@ export class StorageManager {
     // 加载数据
     this.sessions = this.loadJson<Session[]>(this.sessionFile, [])
     this.config = { ...this.getDefaultConfig(), ...this.loadJson<Partial<AppConfig>>(this.configFile, {}) }
+    // 更新配置浅合并会导致空对象覆盖默认值，这里显式补齐 Gitee 默认仓库
+    this.config.update = { ...this.getDefaultConfig().update, ...(this.config.update || {}) }
 
     // 修复损坏的模型配置，并把修复结果写回磁盘
     const rawModelConfig = this.config.modelConfig
@@ -216,6 +224,14 @@ export class StorageManager {
           apiEndpoint = fallbackForId?.apiEndpoint || ''
         }
 
+        // 对话模型统一抬高输出上限：低于 65536 的旧配置（例如 4096）自动迁移，
+        // 避免文档/工具调用长输出被过早截断。
+        const params = { ...(p.params || fallbackForId?.params || {}) }
+        if (type === 'dialogue') {
+          const maxTokens = Number(params.max_tokens) || 0
+          if (maxTokens < 65536) params.max_tokens = 65536
+        }
+
         return {
           ...p,
           name: p.name || fallbackForId?.name || p.id || '未命名模型',
@@ -224,7 +240,7 @@ export class StorageManager {
           apiKey: p.apiKey || '',
           enabled: p.enabled !== false,
           isPrimary: p.isPrimary,
-          params: p.params || fallbackForId?.params || {},
+          params,
           provider: isCustom ? '自定义' : (p.provider || fallbackForId?.provider || '')
         }
       })
@@ -479,6 +495,11 @@ export class StorageManager {
   private getDefaultConfig(): AppConfig {
     return {
       theme: 'light',
+      permissionMode: 'ask',
+      update: {
+        owner: 'dk-zy',
+        repo: 'hrai'
+      },
       modelConfig: {
         dialogue: [
           {
@@ -488,7 +509,7 @@ export class StorageManager {
             apiEndpoint: 'https://api.deepseek.com/v1/chat/completions',
             apiKey: '',
             modelName: 'deepseek-chat',
-            params: { temperature: 0.7, max_tokens: 16384 },
+            params: { temperature: 0.7, max_tokens: 65536 },
             enabled: true,
             isPrimary: true
           },
@@ -499,7 +520,7 @@ export class StorageManager {
             apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
             apiKey: '',
             modelName: 'qwen-turbo',
-            params: { temperature: 0.7, max_tokens: 16384 },
+            params: { temperature: 0.7, max_tokens: 65536 },
             enabled: false
           }
         ],
@@ -535,7 +556,7 @@ export class StorageManager {
             apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
             apiKey: '',
             modelName: 'qwen-vl-max',
-            params: { temperature: 0.7, max_tokens: 16384 },
+            params: { temperature: 0.7, max_tokens: 65536 },
             enabled: true
           }
         ]

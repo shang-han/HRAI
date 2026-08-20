@@ -71,6 +71,22 @@ npm run electron:build
 生成 `release/Hermes人事行政智能专家 Setup 1.0.0.exe`。
 注意：完整安装包需要 `resources/hermes/python`、`git`、`site-packages` 均已就绪。
 
+## Gitee 发布与增量更新
+
+1. 全量构建前，把上一版本的 `release/win-unpacked` 备份为 `release/prev-win-unpacked`
+2. 执行 `npm run electron:build`
+3. 生成增量包：
+   ```bash
+   node scripts/make-delta-package.mjs <旧版本号>
+   ```
+   产物：`release/delta-<旧版本号>-<新版本号>.zip`
+4. 在 Gitee Release 同时上传：
+   - 全量安装包 `Hermes人事行政智能专家 Setup <版本号>.exe`
+   - 增量包 `delta-<旧版本号>-<新版本号>.zip`
+5. 客户端策略：
+   - 同 major.minor 版本线且增量包明显小于全量包 → 增量更新
+   - 跨大版本或增量包过大 → 全量更新
+
 ## 注意事项
 
 - 不要把 `userData`（激活信息、API Key、渠道凭据、聊天记录）提交进仓库
