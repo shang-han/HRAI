@@ -127,6 +127,8 @@ export class StorageManager {
     // 加载数据
     this.sessions = this.loadJson<Session[]>(this.sessionFile, [])
     this.config = { ...this.getDefaultConfig(), ...this.loadJson<Partial<AppConfig>>(this.configFile, {}) }
+    // 更新配置浅合并会导致空对象覆盖默认值，这里显式补齐 Gitee 默认仓库
+    this.config.update = { ...this.getDefaultConfig().update, ...(this.config.update || {}) }
 
     // 修复损坏的模型配置，并把修复结果写回磁盘
     const rawModelConfig = this.config.modelConfig
@@ -484,8 +486,8 @@ export class StorageManager {
       theme: 'light',
       permissionMode: 'ask',
       update: {
-        owner: '',
-        repo: ''
+        owner: 'dk-zy',
+        repo: 'hrai'
       },
       modelConfig: {
         dialogue: [
