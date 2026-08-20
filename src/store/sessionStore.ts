@@ -108,6 +108,9 @@ async function runTurn(
     watchdog = setTimeout(() => {
       const s = get()
       if (s.isLoading || s.isStopping) {
+        // 超时看门狗：主动取消 Hermes 回合，避免界面复位后 ACP 仍在运行，
+        // 下一条消息被当成 active-turn redirect。
+        window.electronAPI.chat.stop().catch(() => {})
         set({ isLoading: false, isStopping: false })
       }
     }, 180000)

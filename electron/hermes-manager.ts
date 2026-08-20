@@ -266,13 +266,18 @@ export class HermesManager {
     const content = [{ type: 'text', text }]
     const promptPromise = (async () => {
       try {
-        // 智能体一轮可能包含多次工具调用，超时放宽到 10 分钟
+        // 智能体一轮可能包含多次工具调用；超时 4 分钟足够长，
+        // 超时后主动取消 ACP 会话，避免下一轮被 Hermes 当作 active-turn redirect。
         await this.sendAcpRequest('session/prompt', {
           prompt: content,
           sessionId
-        }, 600000)
+        }, 240000)
         handler.onDone()
       } catch (err: any) {
+        await this.cancelSession(sessionId).catch(() => {})
+        // 留出短暂时间让 ACP 清理 running 状态，防止紧跟的新消息触发
+        // “Redirected the active turn with your correction.”
+        await new Promise(resolve => setTimeout(resolve, 1500))
         handler.onError(err.message)
       } finally {
         this.streamHandler = null
@@ -294,6 +299,20 @@ export class HermesManager {
       if (this.sessionQueues.get(sessionId) === promptPromise) {
         this.sessionQueues.delete(sessionId)
       }
+    }
+  }
+
+  /**
+   * 主动取消指定 ACP 会话的当前回合。
+   */
+  async cancelSession(sessionId: string): Promise<void> {
+    if (this.process?.stdin?.writable && sessionId) {
+      const req = {
+        jsonrpc: '2.0',
+        method: 'session/cancel',
+        params: { sessionId }
+      }
+      this.process.stdin.write(JSON.stringify(req) + String.fromCharCode(10))
     }
   }
 
@@ -327,7 +346,7 @@ export class HermesManager {
         method: 'session/cancel',
         params: { sessionId }
       }
-      this.process.stdin.write(JSON.stringify(req) + '\n')
+      this.process.stdin.write(JSON.stringify(req) + String.fromCharCode(10))
     }
     this.streamHandler = null
   }
@@ -345,7 +364,7 @@ export class HermesManager {
       const req = { jsonrpc: '2.0', id, method, params }
       this.pendingRequests.set(id, { resolve, reject })
 
-      this.process!.stdin.write(JSON.stringify(req) + '\n')
+      this.process.stdin.write(JSON.stringify(req) + String.fromCharCode(10))
 
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
@@ -745,7 +764,10 @@ export class HermesManager {
 
     let yaml = ''
     if (primaryModel) {
-      const maxTokens = Number(primaryModel.params?.max_tokens) || 16384
+      // 去掉旧配置的低上限：任何低于 65536 的 max_tokens 都提升到 65536，
+      // 只有用户明确设置更高值时保留更高值。
+      const savedMax = Number(primaryModel.params?.max_tokens) || 0
+      const maxTokens = savedMax > 65536 ? savedMax : 65536
       yaml = `model:
   default: "${this.escapeYaml(primaryModel.modelName)}"
   provider: "${this.getProviderName(primaryModel.id)}"

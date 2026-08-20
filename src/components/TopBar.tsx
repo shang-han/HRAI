@@ -44,13 +44,13 @@ const TYPE_LABELS: Record<ModelType, string> = {
 
 // 预设模型
 const MODEL_PRESETS: ModelProvider[] = [
-  { id: 'deepseek-chat', name: 'DeepSeek Chat', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', apiKey: '', modelName: 'deepseek-chat', params: { temperature: 0.7, max_tokens: 16384 }, enabled: true },
-  { id: 'deepseek-reasoner', name: 'DeepSeek R1', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', apiKey: '', modelName: 'deepseek-reasoner', params: { temperature: 0.7, max_tokens: 16384 }, enabled: false },
-  { id: 'qwen-turbo', name: '通义千问 Turbo', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-turbo', params: { temperature: 0.7, max_tokens: 16384 }, enabled: false },
-  { id: 'qwen-plus', name: '通义千问 Plus', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-plus', params: { temperature: 0.7, max_tokens: 16384 }, enabled: false },
-  { id: 'qwen-max', name: '通义千问 Max', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-max', params: { temperature: 0.7, max_tokens: 16384 }, enabled: false },
-  { id: 'glm-4', name: '智谱 GLM-4', provider: '智谱 AI', type: 'dialogue', apiEndpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', apiKey: '', modelName: 'glm-4', params: { temperature: 0.7, max_tokens: 16384 }, enabled: false },
-  { id: 'gpt-4o-mini', name: 'GPT-4o mini', provider: 'OpenAI', type: 'dialogue', apiEndpoint: 'https://api.openai.com/v1/chat/completions', apiKey: '', modelName: 'gpt-4o-mini', params: { temperature: 0.7, max_tokens: 16384 }, enabled: false },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', apiKey: '', modelName: 'deepseek-chat', params: { temperature: 0.7, max_tokens: 65536 }, enabled: true },
+  { id: 'deepseek-reasoner', name: 'DeepSeek R1', provider: 'DeepSeek', type: 'dialogue', apiEndpoint: 'https://api.deepseek.com/v1/chat/completions', apiKey: '', modelName: 'deepseek-reasoner', params: { temperature: 0.7, max_tokens: 65536 }, enabled: false },
+  { id: 'qwen-turbo', name: '通义千问 Turbo', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-turbo', params: { temperature: 0.7, max_tokens: 65536 }, enabled: false },
+  { id: 'qwen-plus', name: '通义千问 Plus', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-plus', params: { temperature: 0.7, max_tokens: 65536 }, enabled: false },
+  { id: 'qwen-max', name: '通义千问 Max', provider: '阿里云', type: 'dialogue', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-max', params: { temperature: 0.7, max_tokens: 65536 }, enabled: false },
+  { id: 'glm-4', name: '智谱 GLM-4', provider: '智谱 AI', type: 'dialogue', apiEndpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', apiKey: '', modelName: 'glm-4', params: { temperature: 0.7, max_tokens: 65536 }, enabled: false },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', provider: 'OpenAI', type: 'dialogue', apiEndpoint: 'https://api.openai.com/v1/chat/completions', apiKey: '', modelName: 'gpt-4o-mini', params: { temperature: 0.7, max_tokens: 65536 }, enabled: false },
   { id: 'wanx-v1', name: '通义万相', provider: '阿里云', type: 'image', apiEndpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis', apiKey: '', modelName: 'wanx-v1', params: { size: '1024*1024' }, enabled: true },
   { id: 'dall-e-3', name: 'DALL-E 3', provider: 'OpenAI', type: 'image', apiEndpoint: 'https://api.openai.com/v1/images/generations', apiKey: '', modelName: 'dall-e-3', params: { size: '1024x1024' }, enabled: false },
   { id: 'qwen-vl-max', name: 'Qwen-VL Max', provider: '阿里云', type: 'multimodal', apiEndpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', apiKey: '', modelName: 'qwen-vl-max', params: { temperature: 0.7 }, enabled: true },
@@ -273,7 +273,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
       apiEndpoint: '',
       apiKey: '',
       modelName: '',
-      params: isDialogue ? { temperature: 0.7, max_tokens: 16384 } : {},
+      params: isDialogue ? { temperature: 0.7, max_tokens: 65536 } : {},
       enabled: true,
       isPrimary: isDialogue && items.length === 0
     }])
@@ -549,8 +549,8 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                         min={256}
                         max={128000}
                         step={256}
-                        value={provider.params?.max_tokens ?? 16384}
-                        onChange={v => update(i, { params: { ...provider.params, max_tokens: v ?? 16384 } })}
+                        value={provider.params?.max_tokens ?? 65536}
+                        onChange={v => update(i, { params: { ...provider.params, max_tokens: v ?? 65536 } })}
                         style={{ width: 160 }}
                       />
                     </div>
