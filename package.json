@@ -10,7 +10,8 @@
     "build": "node build-main.mjs && vite build",
     "electron:dev": "node build-main.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "node build-main.mjs && vite build && electron-builder",
-    "make:delta": "node scripts/make-delta-package.mjs"
+    "make:delta": "node scripts/make-delta-package.mjs",
+    "publish:gitee": "node scripts/publish-gitee-release.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.0",
