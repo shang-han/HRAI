@@ -936,6 +936,18 @@ def _bash_starts(bash: str) -> bool:
     if cached is not None:
         return cached
 
+    # Hermes HR Admin 自带便携 Git Bash：直接信任 Electron 传入的路径。
+    # 该探针在 Windows 并发工具调用时可能卡在子进程管道上，导致
+    # search_files/terminal 等工具永远 pending。
+    custom_bash = os.environ.get("HERMES_GIT_BASH_PATH", "")
+    if custom_bash:
+        try:
+            if os.path.normcase(os.path.normpath(custom_bash)) == os.path.normcase(os.path.normpath(bash)):
+                _bash_starts_cache[bash] = True
+                return True
+        except Exception:
+            pass
+
     try:
         result = subprocess.run(
             [bash, "--noprofile", "--norc", "-c", _BASH_EXTERNAL_PROGRAM_PROBE],
