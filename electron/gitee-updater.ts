@@ -22,6 +22,8 @@ interface ReleaseInfo {
   deltaUrl: string
   deltaFileName: string
   deltaSize: number
+  /** Gitee 单附件 100MB 限制下的全量安装包分卷 */
+  parts: Array<{ name: string; url: string; size: number }>
 }
 
 interface DownloadState {
@@ -90,7 +92,8 @@ export class GiteeUpdater {
         updateType: 'full',
         deltaUrl: '',
         deltaFileName: '',
-        deltaSize: 0
+        deltaSize: 0,
+        parts: []
       }
     }
     if (!resp.ok) {
@@ -101,8 +104,27 @@ export class GiteeUpdater {
     const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '')
     const currentVersion = app.getVersion()
     const assets: any[] = Array.isArray(release.assets) ? release.assets : []
-    const exeAsset = assets.find((a: any) => /\.exe$/i.test(a.name || '')) || assets[0]
-    const downloadUrl = String(exeAsset?.browser_download_url || release.assets_url || '')
+    const exactExe = assets.find((a: any) => /\.exe$/i.test(a.name || ''))
+    const firstPart = assets.find((a: any) => /\.exe\.part\d+$/i.test(a.name || ''))
+    const exeAsset = exactExe || assets[0]
+    const downloadUrl = String(exactExe?.browser_download_url || release.assets_url || '')
+
+    let fileName = String(exeAsset?.name || `Hermes-Setup-${latestVersion}.exe`)
+    if (!exactExe && firstPart) {
+      fileName = String(firstPart.name).replace(/\.part\d+$/i, '')
+    }
+
+    // 分卷附件按编号排序
+    const partAssets = fileName
+      ? assets
+          .filter((a: any) => String(a.name || '').toLowerCase().startsWith(fileName.toLowerCase() + '.part'))
+          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }))
+      : []
+    const parts = partAssets.map((a: any) => ({
+      name: String(a.name),
+      url: String(a.browser_download_url || ''),
+      size: Number(a.size || 0)
+    }))
 
     // 增量包命名约定：delta-<旧版本>-<新版本>.zip
     const deltaPatterns = [
@@ -114,7 +136,9 @@ export class GiteeUpdater {
       assets.find((a: any) => /^delta-.*\.zip$/i.test(a.name || ''))
     const deltaUrl = String(deltaAsset?.browser_download_url || '')
     const deltaSize = Number(deltaAsset?.size || 0)
-    const fullSize = Number(exeAsset?.size || 0)
+    const fullSize = exactExe
+      ? Number(exactExe.size || 0)
+      : parts.reduce((sum, part) => sum + part.size, 0)
 
     // 策略：同 major.minor 版本线且增量包存在，并且增量包明显小于全量包时使用增量；
     // 跨大版本或增量包接近全量包大小时回退全量更新。
@@ -129,13 +153,14 @@ export class GiteeUpdater {
       currentVersion,
       releaseNotes: String(release.body || release.notes || ''),
       downloadUrl,
-      fileName: String(exeAsset?.name || `Hermes-Setup-${latestVersion}.exe`),
+      fileName,
       size: fullSize,
       publishedAt: String(release.created_at || ''),
       updateType: useDelta ? 'incremental' : 'full',
       deltaUrl,
       deltaFileName: String(deltaAsset?.name || ''),
-      deltaSize
+      deltaSize,
+      parts
     }
   }
 
@@ -146,7 +171,6 @@ export class GiteeUpdater {
     }
 
     const incremental = info.updateType === 'incremental' && !!info.deltaUrl
-    const url = incremental ? info.deltaUrl : info.downloadUrl
     const fileName = incremental ? (info.deltaFileName || `delta-${info.currentVersion}-${info.latestVersion}.zip`) : info.fileName
 
     this.downloadAbort?.abort()
@@ -156,10 +180,37 @@ export class GiteeUpdater {
     if (!fs.existsSync(updateDir)) fs.mkdirSync(updateDir, { recursive: true })
     const filePath = path.join(updateDir, fileName)
 
-    const resp = await fetch(url, { signal: this.downloadAbort.signal })
+    if (!incremental && !info.downloadUrl && info.parts.length > 0) {
+      // Gitee 分卷下载：逐个下载后按顺序合并
+      const partPaths: string[] = []
+      let downloadedTotal = 0
+      for (const part of info.parts) {
+        const partPath = `${filePath}.${part.name.match(/part\d+$/i)?.[0] || 'part'}`
+        await this.downloadToFile(part.url, partPath, part.size, downloadedTotal, info.size)
+        downloadedTotal += part.size
+        partPaths.push(partPath)
+      }
+      const out = fs.openSync(filePath, 'w')
+      for (const partPath of partPaths) {
+        const data = fs.readFileSync(partPath)
+        fs.writeSync(out, data)
+        fs.unlinkSync(partPath)
+      }
+      fs.closeSync(out)
+      this.onProgress?.({ total: info.size, downloaded: info.size, percent: 100, filePath })
+      return { filePath, updateType: 'full' }
+    }
+
+    const url = incremental ? info.deltaUrl : info.downloadUrl
+    await this.downloadToFile(url, filePath, info.size, 0, info.size)
+    return { filePath, updateType: incremental ? 'incremental' : 'full' }
+  }
+
+  private async downloadToFile(url: string, filePath: string, partSize: number, offsetBase: number, total: number): Promise<void> {
+    const resp = await fetch(url, { signal: this.downloadAbort?.signal })
     if (!resp.ok || !resp.body) throw new Error(`下载失败：HTTP ${resp.status}`)
 
-    const total = Number(resp.headers.get('content-length') || info.size || 0)
+    const expected = Number(resp.headers.get('content-length') || partSize || 0)
     const reader = resp.body.getReader()
     const chunks: Uint8Array[] = []
     let downloaded = 0
@@ -170,17 +221,16 @@ export class GiteeUpdater {
       if (!value) continue
       chunks.push(value)
       downloaded += value.length
+      const current = offsetBase + downloaded
       this.onProgress?.({
-        total,
-        downloaded,
-        percent: total > 0 ? Math.min(99, Math.round((downloaded / total) * 100)) : 0,
+        total: total || expected,
+        downloaded: current,
+        percent: total > 0 ? Math.min(99, Math.round((current / total) * 100)) : 0,
         filePath
       })
     }
 
     fs.writeFileSync(filePath, Buffer.concat(chunks))
-    this.onProgress?.({ total, downloaded, percent: 100, filePath })
-    return { filePath, updateType: incremental ? 'incremental' : 'full' }
   }
 
   /**
