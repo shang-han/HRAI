@@ -376,8 +376,10 @@ export class HermesManager {
   }
 
   private handleMessage(msg: any): void {
-    // 响应
-    if (msg.id !== undefined) {
+    // 客户端需要响应的请求（agent -> client）。
+    // 当前最重要的是审批：Hermes 执行 terminal/write_file 等危险操作前会发
+    // session/request_permission，若客户端不回应，agent 会一直等到审批超时。
+    if (msg.id !== undefined && msg.method) {
       const pending = this.pendingRequests.get(msg.id)
       if (pending) {
         this.pendingRequests.delete(msg.id)
@@ -386,6 +388,21 @@ export class HermesManager {
         } else {
           pending.resolve(msg.result)
         }
+        return
+      }
+
+      if (msg.method === 'session/request_permission') {
+        // 桌面端暂无审批弹窗，本地可信环境自动允许一次。
+        // 后续如需人工审批，可在这里转发 IPC 弹窗后再回复。
+        this.logManager?.info(`[ACP] 自动批准权限请求 id=${msg.id}`)
+        this.sendJsonResponse(msg.id, {
+          outcome: {
+            outcome: 'selected',
+            optionId: 'allow_once'
+          }
+        })
+      } else {
+        this.logManager?.warn(`[ACP] 未处理的客户端请求: ${msg.method} id=${msg.id}`)
       }
       return
     }
@@ -394,6 +411,11 @@ export class HermesManager {
     if (msg.method) {
       this.handleStreamNotification(msg.method, msg.params)
     }
+  }
+
+  private sendJsonResponse(id: number, result: any): void {
+    if (!this.process?.stdin?.writable) return
+    this.process.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + String.fromCharCode(10))
   }
 
   private handleStreamNotification(method: string, params: any): void {
