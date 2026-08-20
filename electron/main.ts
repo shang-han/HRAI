@@ -562,6 +562,11 @@ function registerIpcHandlers() {
   })
 
   // ============ 应用生命周期模块 ============
+  ipcMain.handle('app:version', async () => {
+    return app.getVersion()
+  })
+
+  // 渲染进程可发起显式退出，主进程统一弹确认框并停止服务
   // 渲染进程可发起显式退出，主进程统一弹确认框并停止服务
   ipcMain.handle('app:quit', async () => {
     return requestQuit()

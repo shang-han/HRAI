@@ -77,6 +77,7 @@ const TopBar: React.FC = () => {
   const [updateProgress, setUpdateProgress] = useState<any>(null)
   const [updateModalOpen, setUpdateModalOpen] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
 
@@ -151,6 +152,24 @@ const TopBar: React.FC = () => {
       setUpdateBusy(false)
     }
   }
+
+  // 启动时：读取版本号，并后台静默检查更新
+  useEffect(() => {
+    let mounted = true
+    window.electronAPI.app.version().then(v => {
+      if (mounted) setAppVersion(v)
+    }).catch(() => {})
+
+    window.electronAPI.update.check().then(info => {
+      if (mounted && info?.hasUpdate) {
+        setUpdateInfo(info)
+        setUpdateModalOpen(true)
+      }
+    }).catch(() => {
+      // 静默检查失败不打扰用户
+    })
+    return () => { mounted = false }
+  }, [])
 
   const handleThemeToggle = () => {
     setTheme(theme === 'light' ? 'dark' : 'light')
@@ -241,7 +260,7 @@ const TopBar: React.FC = () => {
           </div>
           <Divider />
           <div>
-            <h3 className="font-medium mb-2">Gitee 在线升级</h3>
+            <h3 className="font-medium mb-2">Gitee 在线升级 {appVersion && <span className="text-xs text-gray-400">当前版本 v{appVersion}</span>}</h3>
             <div className="space-y-2 mb-2">
               <Input size="small" value={updateOwner} placeholder="Gitee 用户名/组织名（owner）" onChange={e => setUpdateOwner(e.target.value)} />
               <Input size="small" value={updateRepo} placeholder="仓库名（repo），例如 HRAI" onChange={e => setUpdateRepo(e.target.value)} />

@@ -74,6 +74,7 @@ declare global {
       }
       app: {
         quit: () => Promise<{ confirmed: boolean }>
+        version: () => Promise<string>
       }
       permission: {
         onRequest: (callback: (data: { requestId: number; title: string; command: string; description: string }) => void) => () => void

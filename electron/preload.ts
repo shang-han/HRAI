@@ -136,6 +136,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 应用生命周期模块
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
+    version: () => ipcRenderer.invoke('app:version'),
   },
 })
 
@@ -201,6 +202,7 @@ export interface ElectronAPI {
   }
   app: {
     quit: () => Promise<any>
+    version: () => Promise<string>
   }
   update: {
     check: () => Promise<any>
