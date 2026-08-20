@@ -8,7 +8,6 @@ import { ModelRouter } from './model-router'
 import { FileEngine } from './file-engine'
 import { LogManager } from './log-manager'
 import { IntentRouter, IntentMeta } from './intent-router'
-import { OnboardingManager } from './onboarding-manager'
 import { ChannelManager } from './channel-engine/channel-manager'
 import { ChannelId } from './channel-engine/types'
 
@@ -20,7 +19,6 @@ let modelRouter: ModelRouter
 let fileEngine: FileEngine
 let logManager: LogManager
 let intentRouter: IntentRouter
-let onboardingManager: OnboardingManager
 let channelManager: ChannelManager
 let tray: Tray | null = null
 let isQuitting = false
@@ -118,8 +116,6 @@ async function initializeApp() {
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
 
-  // 初始化企业信息问答式引导
-  onboardingManager = new OnboardingManager(logManager, hermesManager, storageManager, intentRouter)
 
   // 初始化渠道接入管理器（微信/企微/钉钉/飞书）
   channelManager = new ChannelManager(
@@ -453,56 +449,40 @@ function registerIpcHandlers() {
   ipcMain.handle('company:status', async () => {
     return {
       completed: storageManager.hasCompanyProfile(),
-      profile: storageManager.getCompanyProfile()
+      profile: storageManager.getCompanyProfile(),
+      knowledge: storageManager.getCompanyKnowledge()
     }
   })
 
-  ipcMain.handle('company:start', async () => {
-    const channel = `company:stream:${Date.now()}`
-    const send = (payload: any) => mainWindow?.webContents.send(channel, payload)
-
-    try {
-      const sessionId = await onboardingManager.start()
-      let full = ''
-      await hermesManager.sendPrompt(onboardingManager.systemPrompt(), sessionId, {
-        onText: (text: string) => { full += text },
-        onThinking: () => {},
-        onDone: () => {
-          send({ type: 'done', data: onboardingManager.parseReply(full) })
-        },
-        onError: (error: string) => send({ type: 'error', data: error })
-      })
-    } catch (err: any) {
-      send({ type: 'error', data: err.message })
+  // 固定问卷：不依赖 API，答案直接落为全局个性化知识库
+  ipcMain.handle('company:saveAnswers', async (_event, answers: Record<string, string>) => {
+    const profile: Record<string, string> = {
+      name: answers.name || '',
+      industry: answers.industry || '',
+      scale: answers.scale || '',
+      mainBusiness: answers.mainBusiness || '',
+      targetCustomers: answers.targetCustomers || '',
+      city: answers.city || '',
+      painPoints: answers.painPoints || '',
+      usageScenarios: answers.usageScenarios || '',
+      tone: answers.tone || '',
+      compliance: answers.compliance || ''
     }
 
-    return { channel }
-  })
-
-  ipcMain.handle('company:answer', async (_event, answer: string) => {
-    const channel = `company:stream:${Date.now()}`
-    const send = (payload: any) => mainWindow?.webContents.send(channel, payload)
-
-    try {
-      const sessionId = await onboardingManager.start()
-      let full = ''
-      await hermesManager.sendPrompt(onboardingManager.answerPrompt(answer), sessionId, {
-        onText: (text: string) => { full += text },
-        onThinking: () => {},
-        onDone: () => {
-          const parsed = onboardingManager.parseReply(full)
-          if (parsed.phase === 'done' && parsed.profile) {
-            onboardingManager.saveProfile(parsed.profile)
-          }
-          send({ type: 'done', data: parsed })
-        },
-        onError: (error: string) => send({ type: 'error', data: error })
-      })
-    } catch (err: any) {
-      send({ type: 'error', data: err.message })
+    const knowledge = {
+      profile,
+      qa: Object.entries(answers)
+        .filter(([, value]) => String(value || '').trim())
+        .map(([key, value]) => ({ key, answer: String(value) })),
+      updatedAt: new Date().toISOString()
     }
 
-    return { channel }
+    storageManager.saveCompanyProfile(profile)
+    storageManager.saveCompanyKnowledge(knowledge)
+    hermesManager.writeCompanyContext(knowledge)
+    intentRouter.setCompanyProfile(profile)
+    logManager.info('企业信息与个性化知识库已保存')
+    return { success: true }
   })
 
   // ============ 渠道接入模块 ============

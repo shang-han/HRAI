@@ -76,10 +76,8 @@ declare global {
         quit: () => Promise<{ confirmed: boolean }>
       }
       company: {
-        status: () => Promise<{ completed: boolean; profile?: any }>
-        start: () => Promise<{ channel: string }>
-        answer: (answer: string) => Promise<{ channel: string }>
-        onStreamData: (channel: string, callback: (data: { type: string; data?: any }) => void) => () => void
+        status: () => Promise<{ completed: boolean; profile?: any; knowledge?: any }>
+        saveAnswers: (answers: Record<string, string>) => Promise<{ success: boolean }>
       }
       channel: {
         status: () => Promise<Array<{ id: string; label: string; enabled: boolean; state: string; detail: string }>>

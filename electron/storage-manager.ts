@@ -84,6 +84,7 @@ export class StorageManager {
   private channelFile: string
   private licenseFile: string
   private companyProfileFile: string
+  private companyKnowledgeFile: string
   private noticeFile: string
   private noticeReadFile: string
   private permissionFile: string
@@ -104,6 +105,7 @@ export class StorageManager {
     this.channelFile = path.join(this.dataDir, 'channel_config.json')
     this.licenseFile = path.join(this.dataDir, 'license.json')
     this.companyProfileFile = path.join(this.dataDir, 'company_profile.json')
+    this.companyKnowledgeFile = path.join(this.dataDir, 'company_knowledge.json')
     this.noticeFile = path.join(userDataPath, 'notice.txt')
     this.noticeReadFile = path.join(this.dataDir, 'notice_read.json')
     this.permissionFile = path.join(this.dataDir, 'permission_config.json')
@@ -372,6 +374,14 @@ export class StorageManager {
 
   hasCompanyProfile(): boolean {
     return fs.existsSync(this.companyProfileFile)
+  }
+
+  getCompanyKnowledge(): any {
+    return this.loadJson(this.companyKnowledgeFile, null)
+  }
+
+  saveCompanyKnowledge(knowledge: any): void {
+    this.saveJson(this.companyKnowledgeFile, knowledge)
   }
 
   // ============ 模板管理 ============

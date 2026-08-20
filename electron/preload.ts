@@ -93,13 +93,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 企业画像模块
   company: {
     status: () => ipcRenderer.invoke('company:status'),
-    start: () => ipcRenderer.invoke('company:start'),
-    answer: (answer: string) => ipcRenderer.invoke('company:answer', answer),
-    onStreamData: (channel: string, callback: (data: any) => void) => {
-      const listener = (_event: any, data: any) => callback(data)
-      ipcRenderer.on(channel, listener)
-      return () => ipcRenderer.removeListener(channel, listener)
-    },
+    saveAnswers: (answers: Record<string, string>) => ipcRenderer.invoke('company:saveAnswers', answers),
   },
 
   // 渠道接入模块
@@ -187,9 +181,7 @@ export interface ElectronAPI {
   }
   company: {
     status: () => Promise<any>
-    start: () => Promise<any>
-    answer: (answer: string) => Promise<any>
-    onStreamData: (channel: string, callback: (data: any) => void) => () => void
+    saveAnswers: (answers: Record<string, string>) => Promise<any>
   }
   channel: {
     status: () => Promise<any>

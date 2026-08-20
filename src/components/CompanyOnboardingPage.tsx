@@ -1,164 +1,96 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Button, Input, Spin, Alert } from 'antd'
-import { SendOutlined, CheckCircleFilled } from '@ant-design/icons'
+import React, { useState } from 'react'
+import { Button, Input, Progress } from 'antd'
+import { ArrowLeftOutlined, ArrowRightOutlined, CheckOutlined, DatabaseOutlined } from '@ant-design/icons'
 
-interface Bubble {
-  role: 'assistant' | 'user'
-  content: string
-}
+const QUESTIONS = [
+  { key: 'name', label: '企业名称', placeholder: '例如：杭州示例科技有限公司' },
+  { key: 'industry', label: '所属行业', placeholder: '例如：互联网软件 / 制造业 / 贸易' },
+  { key: 'scale', label: '员工规模', placeholder: '例如：50-100 人' },
+  { key: 'mainBusiness', label: '主营业务', placeholder: '简单描述公司主要做什么' },
+  { key: 'targetCustomers', label: '目标客户', placeholder: '例如：中小企业客户 / 个人消费者' },
+  { key: 'city', label: '所在城市', placeholder: '例如：杭州' },
+  { key: 'painPoints', label: '当前人事/行政管理的痛点', placeholder: '例如：考勤靠手工统计、制度不完善、招聘周期长' },
+  { key: 'usageScenarios', label: '最希望 Hermes 帮你做什么', placeholder: '例如：生成制度、写招聘文案、做考勤报表' },
+  { key: 'tone', label: '品牌/文案语气偏好', placeholder: '例如：正式严谨 / 年轻活泼 / 简洁直接' },
+  { key: 'compliance', label: '合规与敏感信息要求', placeholder: '例如：薪资信息需加密、文案避免绝对化承诺（可留空）' }
+]
 
 const CompanyOnboardingPage: React.FC<{ onCompleted: () => void }> = ({ onCompleted }) => {
-  const [messages, setMessages] = useState<Bubble[]>([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [done, setDone] = useState(false)
-  const [profile, setProfile] = useState<any>(null)
-  const [error, setError] = useState('')
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const [index, setIndex] = useState(0)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const question = QUESTIONS[index]
+  const isLast = index === QUESTIONS.length - 1
 
-  const appendBubble = (role: Bubble['role'], content: string) => {
-    setMessages(prev => [...prev, { role, content }])
-  }
-
-  const scrollBottom = () => {
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-    })
-  }
-
-  useEffect(() => { scrollBottom() }, [messages, loading])
-
-  const runStream = async (invoke: () => Promise<{ channel: string }>) => {
-    setLoading(true)
-    setError('')
-    try {
-      const { channel } = await invoke()
-      const cleanup = window.electronAPI.company.onStreamData(channel, (data) => {
-        if (data.type === 'done') {
-          cleanup()
-          setLoading(false)
-          const parsed = data.data || {}
-          if (parsed.phase === 'done' && parsed.profile) {
-            setProfile(parsed.profile)
-            setDone(true)
-            if (parsed.closing) appendBubble('assistant', parsed.closing)
-          } else {
-            const question = parsed.question || '请继续描述一下您的企业情况。'
-            appendBubble('assistant', question)
-          }
-        } else if (data.type === 'error') {
-          cleanup()
-          setLoading(false)
-          setError(data.data || '连接 AI 失败，请重试')
-        }
-      })
-    } catch (err: any) {
-      setLoading(false)
-      setError(err?.message || '启动企业信息引导失败')
+  const goNext = () => {
+    if (isLast) {
+      void handleSave()
+    } else {
+      setIndex(index + 1)
     }
   }
 
-  useEffect(() => {
-    runStream(() => window.electronAPI.company.start())
-  }, [])
-
-  const handleSend = async () => {
-    const answer = input.trim()
-    if (!answer || loading || done) return
-    appendBubble('user', answer)
-    setInput('')
-    await runStream(() => window.electronAPI.company.answer(answer))
-  }
-
-  const handleFinalize = async () => {
-    if (loading || done) return
-    await runStream(() => window.electronAPI.company.answer('信息已经足够，请根据以上所有回答生成最终企业画像。'))
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await window.electronAPI.company.saveAnswers(answers)
+      onCompleted()
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-slate-50 to-slate-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950 p-4">
-      <div className="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden" style={{ height: '88vh' }}>
-        {/* 头部 */}
-        <div className="p-5 border-b border-gray-200 dark:border-gray-700 bg-blue-600 text-white">
-          <h1 className="text-xl font-bold">欢迎使用 Hermes 人事行政智能专家</h1>
-          <div className="text-sm text-blue-100 mt-1">
-            首次使用需要简单了解您的企业。问题由 AI 根据您的回答动态生成，通常 6~10 个。
+      <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 flex flex-col" style={{ minHeight: 480 }}>
+        <div className="text-center mb-5">
+          <div className="text-3xl mb-2">🏢</div>
+          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">企业信息初始化</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            共 {QUESTIONS.length} 个固定问题，答案会保存为全局个性化知识库，后续生成内容自动参考
+          </p>
+        </div>
+
+        <div className="mb-4">
+          <Progress
+            percent={Math.round(((index + 1) / QUESTIONS.length) * 100)}
+            showInfo={false}
+            strokeColor="#2563eb"
+          />
+          <div className="text-xs text-gray-400 mt-1">
+            第 {index + 1} / {QUESTIONS.length} 题
           </div>
         </div>
 
-        {/* 对话区 */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50 dark:bg-gray-900">
-          {messages.length === 0 && loading && (
-            <div className="text-center text-gray-400 py-16">
-              <Spin size="large" />
-              <div className="mt-4 text-sm">AI 正在准备第一个问题…</div>
-            </div>
-          )}
-
-          {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 shadow-sm'
-              }`}>
-                {msg.content}
-              </div>
-            </div>
-          ))}
-
-          {loading && messages.length > 0 && (
-            <div className="flex justify-start">
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 shadow-sm">
-                <span className="flex gap-1">
-                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </span>
-              </div>
-            </div>
-          )}
-
-          {error && <Alert type="error" showIcon message={error} />}
-
-          {done && (
-            <div className="rounded-xl bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-4">
-              <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-medium">
-                <CheckCircleFilled /> 企业画像已生成
-              </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                后续所有制度、表单、文案与报表都会自动结合这份企业信息生成。
-              </div>
-              <Button type="primary" className="mt-3" onClick={onCompleted}>
-                进入系统
-              </Button>
-            </div>
-          )}
+        <div className="flex-1">
+          <div className="text-sm text-gray-400 mb-2 flex items-center gap-1">
+            <DatabaseOutlined /> 全局个性化知识库
+          </div>
+          <label className="block text-base font-medium text-gray-800 dark:text-gray-100 mb-2">
+            {question.label}
+          </label>
+          <Input.TextArea
+            autoFocus
+            rows={5}
+            value={answers[question.key] || ''}
+            placeholder={question.placeholder}
+            onChange={e => setAnswers(prev => ({ ...prev, [question.key]: e.target.value }))}
+          />
+          <div className="text-xs text-gray-400 mt-2">可以留空跳过，之后仍可在系统设置中补充。</div>
         </div>
 
-        {/* 输入区 */}
-        {!done && (
-          <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 space-y-2">
-            <div className="flex gap-2">
-              <Input
-                value={input}
-                disabled={loading}
-                placeholder={loading ? 'AI 正在生成下一个问题…' : '请输入您的回答…'}
-                onChange={e => setInput(e.target.value)}
-                onPressEnter={handleSend}
-              />
-              <Button type="primary" icon={<SendOutlined />} onClick={handleSend} disabled={loading || !input.trim()}>
-                发送
-              </Button>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-gray-400">AI 会记住前面的回答，无需重复</span>
-              <Button type="link" size="small" disabled={loading} onClick={handleFinalize}>
-                信息已足够，生成画像
-              </Button>
-            </div>
-          </div>
-        )}
+        <div className="flex items-center justify-between mt-5">
+          <Button
+            icon={<ArrowLeftOutlined />}
+            disabled={index === 0}
+            onClick={() => setIndex(index - 1)}
+          >
+            上一题
+          </Button>
+          <Button type="primary" size="large" loading={saving} onClick={goNext} icon={isLast ? <CheckOutlined /> : <ArrowRightOutlined />}>
+            {isLast ? '完成并保存' : '下一题'}
+          </Button>
+        </div>
       </div>
     </div>
   )
