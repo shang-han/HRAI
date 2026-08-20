@@ -9,6 +9,7 @@ import { FileEngine } from './file-engine'
 import { LogManager } from './log-manager'
 import { IntentRouter, IntentMeta } from './intent-router'
 import { ChannelManager } from './channel-engine/channel-manager'
+import { GiteeUpdater } from './gitee-updater'
 import { ChannelId } from './channel-engine/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -20,6 +21,7 @@ let fileEngine: FileEngine
 let logManager: LogManager
 let intentRouter: IntentRouter
 let channelManager: ChannelManager
+let giteeUpdater: GiteeUpdater
 let tray: Tray | null = null
 let isQuitting = false
 let closeToTrayHintShown = false
@@ -117,6 +119,12 @@ async function initializeApp() {
 
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
+
+  // 初始化 Gitee 在线升级
+  giteeUpdater = new GiteeUpdater(() => (storageManager.getConfig() as any)?.update || { owner: '', repo: '' })
+  giteeUpdater.setProgressHandler((state) => {
+    mainWindow?.webContents.send('update:progress', state)
+  })
 
   // 权限模式桥接：ask 模式下把 ACP 审批请求转发给前端弹窗
   hermesManager.setPermissionBridge({
@@ -523,6 +531,24 @@ function registerIpcHandlers() {
 
   ipcMain.handle('channel:scanPoll', async (_event, channel: 'weixin' | 'wecom' | 'dingtalk' | 'feishu', session: string) => {
     return channelManager.scanPoll(channel, session)
+  })
+
+  // ============ 在线升级模块 ============
+  ipcMain.handle('update:check', async () => {
+    return giteeUpdater.checkForUpdates()
+  })
+
+  ipcMain.handle('update:download', async () => {
+    return giteeUpdater.downloadLatest()
+  })
+
+  ipcMain.handle('update:install', async (_event, filePath: string) => {
+    return giteeUpdater.install(filePath)
+  })
+
+  ipcMain.handle('update:cancel', async () => {
+    giteeUpdater.cancelDownload()
+    return true
   })
 
   // ============ 权限审批模块 ============

@@ -110,6 +110,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // 在线升级模块
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: (filePath: string) => ipcRenderer.invoke('update:install', filePath),
+    cancel: () => ipcRenderer.invoke('update:cancel'),
+    onProgress: (callback: (data: any) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('update:progress', listener)
+      return () => ipcRenderer.removeListener('update:progress', listener)
+    },
+  },
+
   // 权限审批模块
   permission: {
     onRequest: (callback: (data: any) => void) => {
@@ -188,6 +201,13 @@ export interface ElectronAPI {
   }
   app: {
     quit: () => Promise<any>
+  }
+  update: {
+    check: () => Promise<any>
+    download: () => Promise<any>
+    install: (filePath: string) => Promise<any>
+    cancel: () => Promise<any>
+    onProgress: (callback: (data: any) => void) => () => void
   }
   permission: {
     onRequest: (callback: (data: any) => void) => () => void

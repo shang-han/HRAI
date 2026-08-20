@@ -79,6 +79,13 @@ declare global {
         onRequest: (callback: (data: { requestId: number; title: string; command: string; description: string }) => void) => () => void
         respond: (requestId: number, allow: boolean) => Promise<boolean>
       }
+      update: {
+        check: () => Promise<{ hasUpdate: boolean; latestVersion: string; currentVersion: string; releaseNotes: string; downloadUrl: string; fileName: string; size: number; publishedAt: string }>
+        download: () => Promise<string>
+        install: (filePath: string) => Promise<void>
+        cancel: () => Promise<boolean>
+        onProgress: (callback: (data: { total: number; downloaded: number; percent: number; filePath: string }) => void) => () => void
+      }
       company: {
         status: () => Promise<{ completed: boolean; profile?: any; knowledge?: any }>
         saveAnswers: (answers: Record<string, string>) => Promise<{ success: boolean }>

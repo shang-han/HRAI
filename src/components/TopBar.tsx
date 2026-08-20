@@ -61,6 +61,7 @@ const MODEL_PRESETS: ModelProvider[] = [
 const TopBar: React.FC = () => {
   const { theme, setTheme, modelConfig, setModelConfig, layout, toggleSidebar } = useConfigStore()
   const { sessions, activeSessionId } = useSessionStore()
+  const { message } = AntApp.useApp()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
   const [channelConfigOpen, setChannelConfigOpen] = useState(false)
@@ -70,6 +71,12 @@ const TopBar: React.FC = () => {
   const [helpOpen, setHelpOpen] = useState(false)
   const [permissionMode, setPermissionMode] = useState<'ask' | 'auto' | 'readonly'>('ask')
   const [permissionRequest, setPermissionRequest] = useState<any>(null)
+  const [updateOwner, setUpdateOwner] = useState('')
+  const [updateRepo, setUpdateRepo] = useState('')
+  const [updateInfo, setUpdateInfo] = useState<any>(null)
+  const [updateProgress, setUpdateProgress] = useState<any>(null)
+  const [updateModalOpen, setUpdateModalOpen] = useState(false)
+  const [updateBusy, setUpdateBusy] = useState(false)
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
 
@@ -78,13 +85,19 @@ const TopBar: React.FC = () => {
     // 读取当前权限模式
     window.electronAPI.config.get().then((cfg: any) => {
       if (cfg?.permissionMode) setPermissionMode(cfg.permissionMode)
+      if (cfg?.update) {
+        setUpdateOwner(cfg.update.owner || '')
+        setUpdateRepo(cfg.update.repo || '')
+      }
     }).catch(() => {})
 
     // 监听 Hermes ACP 审批请求（仅 ask 模式会收到）
     const offPermission = window.electronAPI.permission.onRequest((data) => {
       setPermissionRequest(data)
     })
-    return () => offPermission()
+    // 监听更新下载进度
+    const offUpdate = window.electronAPI.update.onProgress((data) => setUpdateProgress(data))
+    return () => { offPermission(); offUpdate() }
   }, [])
 
   const checkAnnouncement = async () => {
@@ -96,6 +109,47 @@ const TopBar: React.FC = () => {
         setAnnouncementOpen(true)
       }
     } catch { /* ignore */ }
+  }
+
+  const handleCheckUpdate = async () => {
+    setUpdateBusy(true)
+    try {
+      const info = await window.electronAPI.update.check()
+      setUpdateInfo(info)
+      setUpdateModalOpen(true)
+    } catch (err: any) {
+      message.error(err?.message || '检查更新失败')
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const handleDownloadUpdate = async () => {
+    setUpdateBusy(true)
+    setUpdateProgress(null)
+    try {
+      const filePath = await window.electronAPI.update.download()
+      setUpdateInfo((prev: any) => ({ ...prev, downloadedPath: filePath }))
+      message.success('更新包下载完成')
+    } catch (err: any) {
+      message.error(err?.message || '下载失败')
+    } finally {
+      setUpdateBusy(false)
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!updateInfo?.downloadedPath) return
+    setUpdateBusy(true)
+    try {
+      await window.electronAPI.update.install(updateInfo.downloadedPath)
+      setUpdateModalOpen(false)
+      message.success('已打开安装程序，请按提示完成升级')
+    } catch (err: any) {
+      message.error(err?.message || '打开安装包失败')
+    } finally {
+      setUpdateBusy(false)
+    }
   }
 
   const handleThemeToggle = () => {
@@ -187,6 +241,21 @@ const TopBar: React.FC = () => {
           </div>
           <Divider />
           <div>
+            <h3 className="font-medium mb-2">Gitee 在线升级</h3>
+            <div className="space-y-2 mb-2">
+              <Input size="small" value={updateOwner} placeholder="Gitee 用户名/组织名（owner）" onChange={e => setUpdateOwner(e.target.value)} />
+              <Input size="small" value={updateRepo} placeholder="仓库名（repo），例如 HRAI" onChange={e => setUpdateRepo(e.target.value)} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="small" onClick={() => {
+                window.electronAPI.config.set('update', { owner: updateOwner.trim(), repo: updateRepo.trim() })
+                message.success('Gitee 仓库配置已保存')
+              }}>保存仓库配置</Button>
+              <Button size="small" type="primary" ghost onClick={handleCheckUpdate}>检查更新</Button>
+            </div>
+          </div>
+          <Divider />
+          <div>
             <h3 className="font-medium mb-2">权限模式（Codex 风格）</h3>
             <Radio.Group
               value={permissionMode}
@@ -222,6 +291,42 @@ const TopBar: React.FC = () => {
           </div>
         </div>
       </Drawer>
+
+      {/* Gitee 在线升级弹窗 */}
+      <Modal
+        title="在线升级"
+        open={updateModalOpen}
+        onCancel={() => setUpdateModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setUpdateModalOpen(false)}>关闭</Button>,
+          updateInfo?.hasUpdate && !updateInfo?.downloadedPath ? (
+            <Button key="download" type="primary" loading={updateBusy} onClick={handleDownloadUpdate}>
+              {updateProgress ? `下载中 ${updateProgress.percent}%` : '下载更新'}
+            </Button>
+          ) : null,
+          updateInfo?.downloadedPath ? (
+            <Button key="install" type="primary" danger loading={updateBusy} onClick={handleInstallUpdate}>安装更新</Button>
+          ) : null
+        ].filter(Boolean)}
+      >
+        {updateInfo ? (
+          <div className="space-y-3">
+            <p>当前版本：<strong>{updateInfo.currentVersion}</strong></p>
+            <p>最新版本：<strong>{updateInfo.hasUpdate ? updateInfo.latestVersion : '已是最新'}</strong></p>
+            {updateInfo.hasUpdate && updateInfo.releaseNotes && (
+              <div className="text-xs text-gray-500 whitespace-pre-wrap max-h-40 overflow-auto bg-slate-50 dark:bg-gray-900 p-2 rounded">
+                {updateInfo.releaseNotes}
+              </div>
+            )}
+            {updateProgress && !updateInfo.downloadedPath && (
+              <div className="text-xs text-blue-600">
+                已下载 {Math.round((updateProgress.downloaded || 0) / 1024 / 1024)}MB
+                {updateProgress.total ? ` / ${Math.round(updateProgress.total / 1024 / 1024)}MB` : ''}
+              </div>
+            )}
+          </div>
+        ) : <p>正在检查…</p>}
+      </Modal>
 
       {/* Hermes 权限审批弹窗 */}
       <Modal

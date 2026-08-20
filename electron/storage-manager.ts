@@ -38,6 +38,10 @@ interface AppConfig {
   theme: 'light' | 'dark'
   /** 权限模式：ask=高危操作审批 | auto=完全放开 | readonly=只读保护 */
   permissionMode: 'ask' | 'auto' | 'readonly'
+  update: {
+    owner: string
+    repo: string
+  }
   modelConfig: {
     dialogue: ModelProvider[]
     image: ModelProvider[]
@@ -479,6 +483,10 @@ export class StorageManager {
     return {
       theme: 'light',
       permissionMode: 'ask',
+      update: {
+        owner: '',
+        repo: ''
+      },
       modelConfig: {
         dialogue: [
           {
