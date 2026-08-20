@@ -403,10 +403,9 @@ export class HermesManager {
   }
 
   private handleMessage(msg: any): void {
-    // 客户端需要响应的请求（agent -> client）。
-    // 当前最重要的是审批：Hermes 执行 terminal/write_file 等危险操作前会发
-    // session/request_permission，若客户端不回应，agent 会一直等到审批超时。
-    if (msg.id !== undefined && msg.method) {
+    // 1. 带 id 的消息：优先按我们自己发出的请求响应处理；
+    //    JSON-RPC 响应没有 method 字段，所以这里不能依赖 method。
+    if (msg.id !== undefined) {
       const pending = this.pendingRequests.get(msg.id)
       if (pending) {
         this.pendingRequests.delete(msg.id)
@@ -418,15 +417,18 @@ export class HermesManager {
         return
       }
 
+      // 2. 不是我们的待响应请求，则可能是 agent 发来的客户端请求。
+      //    当前最重要的是审批：Hermes 执行 terminal/write_file 等危险操作前会发
+      //    session/request_permission，若客户端不回应，agent 会一直等到审批超时。
       if (msg.method === 'session/request_permission') {
         this.handlePermissionRequest(msg)
-      } else {
+      } else if (msg.method) {
         this.logManager?.warn(`[ACP] 未处理的客户端请求: ${msg.method} id=${msg.id}`)
       }
       return
     }
 
-    // 通知（流式数据）
+    // 3. 通知（流式数据）
     if (msg.method) {
       this.handleStreamNotification(msg.method, msg.params)
     }
