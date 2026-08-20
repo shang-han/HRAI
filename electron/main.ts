@@ -120,6 +120,11 @@ async function initializeApp() {
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
 
+  // 清理旧版本遗留的 gateway/channel_sync 进程，避免微信/企微双通道抢消息
+  await hermesManager.killLegacyGatewayProcesses().catch((err: any) => {
+    logManager.debug(`旧进程清理跳过: ${err.message}`)
+  })
+
   // 初始化 Gitee 在线升级
   giteeUpdater = new GiteeUpdater(() => (storageManager.getConfig() as any)?.update || { owner: '', repo: '' })
   giteeUpdater.setProgressHandler((state) => {

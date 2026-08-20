@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, ChildProcess, exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
@@ -89,6 +89,44 @@ export class HermesManager {
   }
 
   get isRunning() { return this._isRunning }
+
+  /**
+   * 清理旧版本遗留的 Hermes gateway / channel_sync 进程。
+   * 当前架构下微信/企微由 Electron 连接器直连，任何残留 gateway
+   * 都会造成同一渠道双通道抢消息。
+   */
+  async killLegacyGatewayProcesses(): Promise<void> {
+    if (process.platform !== 'win32') return
+
+    try {
+      const { stdout } = await this.execAsync(
+        "wmic process where \"name='python.exe'\" get ProcessId,CommandLine",
+        { windowsHide: true }
+      )
+      for (const rawLine of (stdout || '').split(String.fromCharCode(10))) {
+        const line = rawLine.trim()
+        if (!line || !/gateway\.run|channel_sync\.py/i.test(line)) continue
+        // 只清理本应用相关进程，避免误杀其他项目的 Hermes
+        if (!/hermes-hr-admin|resources.*hermes.*python/i.test(line)) continue
+        const parts = line.split(/\s+/)
+        const pid = Number(parts[parts.length - 1])
+        if (!Number.isInteger(pid) || pid <= 0) continue
+        try {
+          process.kill(pid, 'SIGKILL')
+          this.logManager?.info(`已清理旧版 Hermes gateway/channel_sync 进程: ${pid}`)
+        } catch { /* ignore */ }
+      }
+    } catch { /* 没有残留进程或清理失败都不影响启动 */ }
+  }
+
+  private execAsync(cmd: string, options: any): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      exec(cmd, { encoding: 'utf-8', ...options }, (error, stdout, stderr) => {
+        if (error) reject(error)
+        else resolve({ stdout: String(stdout), stderr: String(stderr) })
+      })
+    })
+  }
 
   setPermissionBridge(bridge: HermesPermissionBridge): void {
     this.permissionBridge = bridge
