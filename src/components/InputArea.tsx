@@ -248,13 +248,13 @@ const InputArea: React.FC = () => {
   }
 
   return (
-    <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+    <div className="shrink-0 border-t border-line p-4 bg-surface">
       {/* 图片预览 */}
       {images.length > 0 && (
         <div className="flex gap-2 mb-2 flex-wrap">
           {images.map((img, i) => (
             <div key={i} className="relative group">
-              <img src={img} alt="" className="w-16 h-16 object-cover rounded-lg border border-gray-200 dark:border-gray-600" />
+              <img src={img} alt="" className="w-16 h-16 object-cover rounded-lg border border-line" />
               <button
                 onClick={() => removeImage(i)}
                 className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs hidden group-hover:block"
@@ -307,7 +307,7 @@ const InputArea: React.FC = () => {
 
       {/* 斜杠命令补全 */}
       {showCommandMenu && (
-        <div className="mb-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 shadow-lg overflow-hidden">
+        <div className="mb-2 border border-line rounded-lg bg-surface shadow-lg overflow-hidden">
           {filteredCommands.map((cmd, i) => (
             <div
               key={cmd.name}
@@ -320,11 +320,11 @@ const InputArea: React.FC = () => {
               className={`px-3 py-2 cursor-pointer text-sm flex items-center justify-between gap-4 ${
                 i === commandIndex
                   ? 'bg-primary/10 text-primary'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                  : 'hover:bg-surfaceSubtle dark:hover:bg-canvas'
               }`}
             >
               <span className="font-medium">/{cmd.name}</span>
-              <span className="text-gray-500 dark:text-gray-400 text-xs truncate">
+              <span className="text-inkMuted text-xs truncate">
                 {cmd.description || cmd.input_hint || ''}
               </span>
             </div>
@@ -352,7 +352,7 @@ const InputArea: React.FC = () => {
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={isMultiLine ? '输入需求... (Ctrl+Enter 发送)' : '输入需求... (Enter 发送)'}
-          className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 resize-none focus:border-primary focus:outline-none transition-colors"
+          className="flex-1 border border-line rounded-lg p-3 bg-canvas text-ink resize-none focus:border-primary focus:outline-none transition-colors"
           rows={isMultiLine ? 4 : 2}
         />
         {isLoading && (
@@ -385,7 +385,7 @@ const InputArea: React.FC = () => {
         cancelText="取消"
       >
         <p>检测到您可能需要生成 PPT / Excel / 视频等富格式文件。</p>
-        <p className="text-gray-500 mt-2 text-sm">建议在指令中明确要求 AI 使用结构化格式输出，以降低排版异常概率。</p>
+        <p className="text-inkMuted mt-2 text-sm">建议在指令中明确要求 AI 使用结构化格式输出，以降低排版异常概率。</p>
       </Modal>
     </div>
   )

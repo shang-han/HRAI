@@ -8,7 +8,7 @@
     "build:main": "node build-main.mjs",
     "build:renderer": "vite build",
     "build": "node build-main.mjs && vite build",
-    "electron:dev": "node build-main.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "node build-main.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && set NODE_ENV=development&&electron .\"",
     "electron:build": "node build-main.mjs && vite build && electron-builder"
   },
   "dependencies": {

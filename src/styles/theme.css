@@ -1,0 +1,188 @@
+/* ============================================================
+   Hermes HR Admin 主题样式文件
+   ------------------------------------------------------------
+   全应用颜色与通用样式的唯一来源（单一改动点）。
+   - 改颜色：只改下面的变量（浅色在 :root，深色在 .dark）
+   - 改通用样式：只改下方对应区块
+   组件里一律使用语义类名（bg-canvas / bg-surface / border-line /
+   text-ink / text-primary 等），不要直接写色值。
+   ============================================================ */
+
+/* ---------- 颜色变量 · 浅色模式 ---------- */
+:root {
+  /* 品牌主色与语义色 */
+  --color-primary: #4F46E5;          /* 主色：按钮/选中态/链接/高亮 */
+  --color-primary-hover: #6366F1;    /* 主色悬停 */
+  --color-primary-light: #818CF8;    /* 主色浅档：深色模式下的文字强调 */
+  --color-primary-soft: #eef0fe;     /* 主色淡底：选中项/导航悬停背景 */
+  --color-accent: #0891B2;           /* 辅助色（青蓝）：分类标题/图标点缀 */
+  --color-accent-soft: #e0f4f7;      /* 辅助色淡底 */
+  --color-danger: #F53F3F;           /* 危险/删除 */
+  --color-warning: #FF7D00;          /* 警告 */
+  --color-success: #00B42A;          /* 成功 */
+
+  /* 表面层次：canvas 页面底 比 surface 卡片/面板 深一档 */
+  --color-canvas: #eef0f4;           /* 页面底色 */
+  --color-surface: #ffffff;          /* 卡片/面板/顶栏 */
+  --color-surface-subtle: #f3f4f6;   /* 悬浮态/次级面板 */
+  --color-line: #dde2ea;             /* 边框/分隔线 */
+
+  /* 文本层级 */
+  --color-ink: #374151;              /* 主文本 */
+  --color-ink-secondary: #4b5563;    /* 次要文本 */
+  --color-ink-muted: #6b7280;        /* 弱化文本/占位 */
+
+  /* 滚动条 */
+  --color-scrollbar: #c3cad6;
+}
+
+/* ---------- 颜色变量 · 深色模式 ---------- */
+.dark {
+  --color-primary: #6366F1;
+  --color-primary-hover: #818CF8;
+  --color-primary-light: #a5b4fc;
+  --color-primary-soft: #232a52;
+  --color-accent: #22D3EE;
+  --color-accent-soft: #0e2a30;
+
+  --color-canvas: #0b0e15;           /* 页面底更深，与面板拉开层次 */
+  --color-surface: #161b26;
+  --color-surface-subtle: #1d2532;
+  --color-line: #2a3242;
+
+  --color-ink: #e5e7eb;
+  --color-ink-secondary: #9ca3af;
+  --color-ink-muted: #9ca3af;
+
+  --color-scrollbar: #3d4859;
+}
+
+/* ---------- 通用样式 ---------- */
+
+/* 自绘标题栏：整行可拖拽移动窗口，按钮/菜单等交互元素除外 */
+.app-titlebar {
+  -webkit-app-region: drag;
+}
+.app-titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+/* 原生按钮重置：项目关闭了 Tailwind preflight，
+   裸 <button> 会带浏览器默认边框/背景，统一去掉（不影响 antd 按钮） */
+button:not(.ant-btn) {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+/* 弹层（抽屉/弹窗/下拉等）在拖拽区上"打洞"：
+   拖拽区是系统级命中区域，会吞掉盖在它上面的点击，
+   必须给所有可能覆盖到顶部的弹层标记 no-drag。 */
+.ant-drawer,
+.ant-drawer .ant-drawer-mask,
+.ant-modal,
+.ant-modal .ant-modal-mask,
+.ant-dropdown,
+.ant-popover,
+.ant-select-dropdown,
+.ant-message,
+.ant-notification {
+  -webkit-app-region: no-drag;
+}
+
+/* 全局滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar);
+  border-radius: 3px;
+}
+
+/* 消息进入动画 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.message-enter {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* 外部链接警告样式 */
+.external-link {
+  position: relative;
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.external-link::after {
+  content: '⚠ 外部网站，请自行辨别风险';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.external-link:hover::after {
+  opacity: 1;
+}
+
+/* Markdown 消息内容样式 */
+.markdown-content h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.markdown-content h2 { font-size: 1.25rem; font-weight: 600; margin: 0.875rem 0 0.5rem; }
+.markdown-content h3 { font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.375rem; }
+.markdown-content p { margin: 0.5rem 0; line-height: 1.7; }
+.markdown-content ul, .markdown-content ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+.markdown-content li { margin: 0.25rem 0; }
+.markdown-content code {
+  background: var(--color-surface-subtle);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+.markdown-content pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+}
+.markdown-content th, .markdown-content td {
+  border: 1px solid var(--color-line);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.markdown-content th {
+  background: var(--color-surface-subtle);
+  font-weight: 600;
+}
+.markdown-content blockquote {
+  border-left: 4px solid var(--color-primary);
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: var(--color-ink-muted);
+}

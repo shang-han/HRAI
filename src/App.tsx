@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import ChatArea from './components/ChatArea'
 import InputArea from './components/InputArea'
 import TopBar from './components/TopBar'
+import TitleBar from './components/TitleBar'
 import ActivationPage from './components/ActivationPage'
 import CompanyOnboardingPage from './components/CompanyOnboardingPage'
 import OfflineBar from './components/OfflineBar'
@@ -93,18 +94,26 @@ const App: React.FC = () => {
     checkCompanyOnboarding()
   }
 
+  // 统一外壳：所有页面（激活/引导/加载/主界面）顶部都带自绘标题栏
+  const withFrame = (content: React.ReactNode) => (
+    <div className="h-screen flex flex-col overflow-hidden bg-canvas">
+      <TitleBar />
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{content}</div>
+    </div>
+  )
+
   // 未激活 → 显示激活页面
   if (activated === false) {
-    return <ActivationPage onActivated={handleActivated} />
+    return withFrame(<ActivationPage onActivated={handleActivated} />)
   }
 
   // 加载中
   if (activated === null) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-50 dark:bg-gray-900">
+    return withFrame(
+      <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
           <div className="text-4xl mb-4">🔄</div>
-          <div className="text-gray-500">正在加载...</div>
+          <div className="text-inkMuted">正在加载...</div>
         </div>
       </div>
     )
@@ -112,12 +121,12 @@ const App: React.FC = () => {
 
   // 首次使用：企业信息问答式引导
   if (activated && onboarding === true) {
-    return <CompanyOnboardingPage onCompleted={enterMainApp} />
+    return withFrame(<CompanyOnboardingPage onCompleted={enterMainApp} />)
   }
 
   // 主界面
-  return (
-    <div className="h-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-gray-900">
+  return withFrame(
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* 离线提示条 */}
       {!online && <OfflineBar />}
 

@@ -40,13 +40,17 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     },
+    // 无边框窗口：标题栏由渲染层自绘（图标+系统名称+中文菜单同行）。
+    // frame: false 去掉标题栏，thickFrame: false 再去掉 Windows 标准细边框与阴影。
+    frame: false,
+    thickFrame: false,
     show: false
   })
 
   // 开发模式加载 Vite dev server，生产模式加载打包文件
+  // 调试工具不再自动打开，需要时用"视图 → 开发者工具"手动开启
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173')
-    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -82,6 +86,10 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  // 最大化状态变化时推送给渲染层，标题栏按钮图标跟随切换
+  mainWindow.on('maximize', () => mainWindow?.webContents.send('app:maximizedChanged', true))
+  mainWindow.on('unmaximize', () => mainWindow?.webContents.send('app:maximizedChanged', false))
 
   // 外部链接在系统浏览器打开
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -134,6 +142,7 @@ async function initializeApp() {
 
   // 注册 IPC 处理器
   registerIpcHandlers()
+  registerWindowControlHandlers()
 
   // 启动已启用的渠道连接器（后台异步，不阻塞窗口）
   channelManager.startAll().catch((err: any) => {
@@ -583,6 +592,66 @@ async function requestQuit(): Promise<{ confirmed: boolean }> {
   return { confirmed: false }
 }
 
+/**
+ * 应用菜单：标题栏由渲染层自绘（图标+系统名称+中文菜单同行），
+ * 原生标题栏隐藏后菜单条随之消失，这里显式移除，避免多出一条英文菜单。
+ */
+function setupAppMenu() {
+  Menu.setApplicationMenu(null)
+}
+
+/**
+ * 窗口控制：渲染层自绘标题栏上的最小化/最大化/关闭按钮，
+ * 以及"视图/窗口/帮助"菜单所需的窗口操作，全部经由 IPC 转发。
+ */
+function registerWindowControlHandlers() {
+  ipcMain.handle('app:minimize', () => {
+    mainWindow?.minimize()
+  })
+
+  ipcMain.handle('app:toggleMaximize', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize()
+    } else {
+      mainWindow.maximize()
+    }
+  })
+
+  // 关闭窗口：走与点 X 相同的 close 事件 → 隐藏到托盘，服务继续运行
+  ipcMain.handle('app:close', () => {
+    mainWindow?.close()
+  })
+
+  ipcMain.handle('app:openDevTools', () => {
+    mainWindow?.webContents.openDevTools()
+  })
+
+  // 查询窗口是否最大化（渲染层据此切换"最大化/还原"图标）
+  ipcMain.handle('app:isMaximized', () => {
+    return mainWindow?.isMaximized() ?? false
+  })
+
+  ipcMain.handle('app:zoom', (_event, dir: 'in' | 'out' | 'reset') => {
+    const wc = mainWindow?.webContents
+    if (!wc) return
+    const current = wc.getZoomLevel()
+    if (dir === 'in') wc.setZoomLevel(Math.min(current + 0.5, 3))
+    else if (dir === 'out') wc.setZoomLevel(Math.max(current - 0.5, -3))
+    else wc.setZoomLevel(0)
+  })
+
+  ipcMain.handle('app:about', () => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '关于',
+      message: 'Hermes 人事行政一体化智能专家',
+      detail: '版本 1.0.0\n面向中小企业的人事+行政一体化 AI 智能助手',
+      buttons: ['确定']
+    }).catch(() => {})
+  })
+}
+
 function createTray() {
   if (tray) return
   tray = new Tray(getTrayIcon())
@@ -616,6 +685,7 @@ app.whenReady().then(() => {
   })
 
   createTray()
+  setupAppMenu()
   initializeApp()
 })
 

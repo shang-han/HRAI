@@ -55,10 +55,10 @@ const ChatArea: React.FC = () => {
       <div className="flex-1 overflow-auto min-h-0 p-4 flex items-center justify-center">
         <div className="text-center max-w-md">
           <div className="text-6xl mb-4">🤖</div>
-          <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-2">
+          <h2 className="text-xl font-semibold text-ink mb-2">
             您好，我是人事行政一体化智能专家
           </h2>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">
+          <p className="text-inkMuted text-sm">
             您可以点击左侧业务菜单快速生成各类表单、制度方案，也可以直接输入您的需求。
           </p>
           <div className="mt-6 grid grid-cols-2 gap-3 text-left">
@@ -70,7 +70,7 @@ const ChatArea: React.FC = () => {
             ].map((prompt, i) => (
               <div
                 key={i}
-                className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg text-sm cursor-pointer hover:border-primary hover:text-primary transition-all"
+                className="p-3 border border-line rounded-lg text-sm cursor-pointer hover:border-primary hover:text-primary transition-all"
                 onClick={() => {
                   const event = new CustomEvent('fillInput', { detail: prompt })
                   window.dispatchEvent(event)
@@ -102,7 +102,7 @@ const ChatArea: React.FC = () => {
             className={`max-w-[80%] rounded-2xl px-4 py-3 ${
               message.role === 'user'
                 ? 'bg-primary text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100'
+                : 'bg-surface text-ink'
             }`}
           >
             {/* 图片展示 */}
@@ -119,9 +119,9 @@ const ChatArea: React.FC = () => {
               <div>
                 {/* 思考过程 */}
                 {message.thinking && (
-                  <details className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+                  <details className="mb-2 text-sm text-inkMuted">
                     <summary className="cursor-pointer hover:text-primary">💭 思考过程</summary>
-                    <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-900 rounded-lg text-xs whitespace-pre-wrap">
+                    <div className="mt-1 p-2 bg-surfaceSubtle dark:bg-canvas rounded-lg text-xs whitespace-pre-wrap">
                       {message.thinking}
                     </div>
                   </details>
@@ -145,7 +145,7 @@ const ChatArea: React.FC = () => {
             )}
 
             {/* 时间戳 */}
-            <div className={`text-xs mt-1 ${message.role === 'user' ? 'text-primaryLight' : 'text-gray-400'}`}>
+            <div className={`text-xs mt-1 ${message.role === 'user' ? 'text-primaryLight' : 'text-inkMuted'}`}>
               {new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
               {message.model && ` · ${message.model}`}
             </div>
@@ -156,11 +156,11 @@ const ChatArea: React.FC = () => {
       {/* 加载中指示器 */}
       {isLoading && messages[messages.length - 1]?.role === 'user' && (
         <div className="flex justify-start message-enter">
-          <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 py-3">
+          <div className="bg-surface rounded-2xl px-4 py-3">
             <div className="flex gap-1">
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         </div>

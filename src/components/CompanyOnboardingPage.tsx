@@ -41,12 +41,12 @@ const CompanyOnboardingPage: React.FC<{ onCompleted: () => void }> = ({ onComple
   }
 
   return (
-    <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-slate-50 to-slate-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950 p-4">
-      <div className="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 flex flex-col" style={{ minHeight: 480 }}>
+    <div className="h-full flex items-center justify-center bg-gradient-to-br from-blue-50 via-canvas to-canvas dark:from-canvas p-4">
+      <div className="w-full max-w-xl bg-surface rounded-2xl shadow-xl p-6 flex flex-col" style={{ minHeight: 480 }}>
         <div className="text-center mb-5">
           <div className="text-3xl mb-2">🏢</div>
-          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">企业信息初始化</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-xl font-bold text-ink">企业信息初始化</h1>
+          <p className="text-sm text-inkMuted mt-1">
             共 {QUESTIONS.length} 个固定问题，答案会保存为全局个性化知识库，后续生成内容自动参考
           </p>
         </div>
@@ -55,18 +55,18 @@ const CompanyOnboardingPage: React.FC<{ onCompleted: () => void }> = ({ onComple
           <Progress
             percent={Math.round(((index + 1) / QUESTIONS.length) * 100)}
             showInfo={false}
-            strokeColor="#2563eb"
+            strokeColor={getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim() || '#4F46E5'}
           />
-          <div className="text-xs text-gray-400 mt-1">
+          <div className="text-xs text-inkMuted mt-1">
             第 {index + 1} / {QUESTIONS.length} 题
           </div>
         </div>
 
         <div className="flex-1">
-          <div className="text-sm text-gray-400 mb-2 flex items-center gap-1">
+          <div className="text-sm text-inkMuted mb-2 flex items-center gap-1">
             <DatabaseOutlined /> 全局个性化知识库
           </div>
-          <label className="block text-base font-medium text-gray-800 dark:text-gray-100 mb-2">
+          <label className="block text-base font-medium text-ink mb-2">
             {question.label}
           </label>
           <Input.TextArea
@@ -76,7 +76,7 @@ const CompanyOnboardingPage: React.FC<{ onCompleted: () => void }> = ({ onComple
             placeholder={question.placeholder}
             onChange={e => setAnswers(prev => ({ ...prev, [question.key]: e.target.value }))}
           />
-          <div className="text-xs text-gray-400 mt-2">可以留空跳过，之后仍可在系统设置中补充。</div>
+          <div className="text-xs text-inkMuted mt-2">可以留空跳过，之后仍可在系统设置中补充。</div>
         </div>
 
         <div className="flex items-center justify-between mt-5">

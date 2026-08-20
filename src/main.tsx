@@ -6,6 +6,13 @@ import App from './App'
 import './index.css'
 import { useConfigStore } from './store/configStore'
 
+// 读取 theme.css 中的主色变量，保证 antd 与应用配色同源
+function getCssVar(name: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
 function Root() {
   const themeMode = useConfigStore(state => state.theme)
 
@@ -15,7 +22,7 @@ function Root() {
       theme={{
         algorithm: themeMode === 'dark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#4F46E5',
+          colorPrimary: getCssVar('--color-primary', '#4F46E5'),
           borderRadius: 8,
         }
       }}

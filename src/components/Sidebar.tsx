@@ -6,13 +6,16 @@ import {
   PlusOutlined,
   DeleteOutlined,
   EditOutlined,
+  LockOutlined,
   SearchOutlined,
   MessageOutlined,
   BookOutlined,
   ApartmentOutlined,
   StarOutlined,
   LeftOutlined,
-  RightOutlined
+  RightOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined
 } from '@ant-design/icons'
 
 const Sidebar: React.FC = () => {
@@ -29,6 +32,9 @@ const Sidebar: React.FC = () => {
     presets: true,
     templates: true
   })
+  // 业务导航树：一级（中心）与二级（模块）的展开状态，默认只展开第一个中心
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({})
+  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({})
 
   const collapsed = layout.sidebarCollapsed
 
@@ -93,14 +99,14 @@ const Sidebar: React.FC = () => {
 
   if (collapsed) {
     return (
-      <aside className="w-12 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col items-center py-3 gap-3">
+      <aside className="w-12 bg-surface border-r border-line flex flex-col items-center py-3 gap-3 transition-all duration-300">
         <Tooltip title="展开侧边栏">
-          <button onClick={toggleSidebar} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+          <button onClick={toggleSidebar} className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
             <RightOutlined />
           </button>
         </Tooltip>
         <Tooltip title="新建会话">
-          <button onClick={() => createSession()} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+          <button onClick={() => createSession()} className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
             <PlusOutlined />
           </button>
         </Tooltip>
@@ -109,14 +115,14 @@ const Sidebar: React.FC = () => {
   }
 
   return (
-    <aside className="w-[340px] bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-shrink-0 flex flex-col transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl">
+    <aside className="w-[340px] bg-surface border-r border-line flex-shrink-0 flex flex-col transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl">
       {/* 头部 */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+      <div className="p-4 border-b border-line flex justify-between items-center">
         <div>
           <h1 className="font-bold text-xl text-primary">Hermes HR智脑</h1>
-          <div className="text-xs text-slate-400">人事行政一体化智能专家</div>
+          <div className="text-xs text-inkMuted">人事行政一体化智能专家</div>
         </div>
-        <button onClick={toggleSidebar} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 hidden md:block">
+        <button onClick={toggleSidebar} className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas hidden md:block">
           <LeftOutlined />
         </button>
       </div>
@@ -124,12 +130,24 @@ const Sidebar: React.FC = () => {
       {/* 内容区 */}
       <div className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-3">
         {/* 会话列表 */}
-        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-slate-50 dark:bg-gray-800">
-          <div onClick={() => toggleSection('sessions')} className="p-3 bg-slate-100 dark:bg-gray-700 flex justify-between cursor-pointer">
+        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
+          <div onClick={() => toggleSection('sessions')} className="p-3 bg-primarySoft flex justify-between items-center cursor-pointer">
             <span><MessageOutlined /> 会话列表</span>
-            <span className="text-xs">{expandedSections.sessions ? '▼' : '▶'}</span>
+            <div className="flex items-center gap-2">
+              <button
+                title="新建会话"
+                onClick={e => { e.stopPropagation(); createSession() }}
+                className="p-1 rounded hover:bg-canvas text-sm leading-none"
+              >
+                <PlusOutlined />
+              </button>
+              <span className="text-xs">
+                <CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.sessions ? 'rotate-90' : 'rotate-0'}`} />
+              </span>
+            </div>
           </div>
-          {expandedSections.sessions && (
+          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.sessions ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            <div className="overflow-hidden min-h-0">
             <div className="p-2 space-y-1">
               <Input
                 prefix={<SearchOutlined />}
@@ -144,47 +162,52 @@ const Sidebar: React.FC = () => {
                 .map(session => (
                   <div
                     key={session.id}
-                    className={`flex items-center gap-1 p-2 rounded-lg cursor-pointer group ${
+                    className={`flex items-center gap-1 p-1.5 rounded-lg cursor-pointer group ${
                       activeSessionId === session.id
-                        ? 'bg-primary/10 text-primary'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                        ? 'bg-primarySoft text-primary'
+                        : 'hover:bg-canvas'
                     }`}
                     onClick={() => switchSession(session.id)}
                   >
                     <span className="flex-1 truncate text-sm">{session.name}</span>
-                    <div className="hidden group-hover:flex gap-1">
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={e => { e.stopPropagation(); setRenaming(session.id); setRenameValue(session.name) }}
-                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-xs"
+                        className="p-1 rounded hover:bg-canvas text-xs"
                       >
                         <EditOutlined />
                       </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); setDeleteConfirm(session.id) }}
-                        className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-xs text-red-500"
-                      >
-                        <DeleteOutlined />
-                      </button>
+                      {session.isDefault ? (
+                        <span
+                          title="默认会话不可删除"
+                          className="p-1 text-xs text-inkMuted"
+                        >
+                          <LockOutlined />
+                        </span>
+                      ) : (
+                        <button
+                          onClick={e => { e.stopPropagation(); setDeleteConfirm(session.id) }}
+                          className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-xs text-red-500"
+                        >
+                          <DeleteOutlined />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
-              <button
-                onClick={() => createSession()}
-                className="w-full text-left p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-gray-500"
-              >
-                <PlusOutlined /> 新建会话
-              </button>
             </div>
-          )}
+            </div>
+          </div>
         </div>
 
         {/* 近期重点工作 */}
-        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-slate-50 dark:bg-gray-800">
-          <div onClick={() => toggleSection('workPriority')} className="p-3 bg-slate-100 dark:bg-gray-700 flex justify-between cursor-pointer">
+        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
+          <div onClick={() => toggleSection('workPriority')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
             <span><BookOutlined /> 近期重点工作</span>
-            <span className="text-xs">{expandedSections.workPriority ? '▼' : '▶'}</span>
+            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.workPriority ? 'rotate-90' : 'rotate-0'}`} /></span>
           </div>
-          {expandedSections.workPriority && (
+          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.workPriority ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            <div className="overflow-hidden min-h-0">
             <div className="p-2">
               <Input.TextArea
                 placeholder="填写当前项目背景、目标人群、使用场景，辅助AI精准输出"
@@ -196,61 +219,91 @@ const Sidebar: React.FC = () => {
                 <Button size="small" type="text">历史折叠</Button>
               </div>
             </div>
-          )}
+            </div>
+          </div>
         </div>
 
         {/* 业务导航 */}
-        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-slate-50 dark:bg-gray-800">
-          <div onClick={() => toggleSection('businessNav')} className="p-3 bg-slate-100 dark:bg-gray-700 flex justify-between cursor-pointer">
+        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
+          <div onClick={() => toggleSection('businessNav')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
             <span><ApartmentOutlined /> 人事-行政业务导航</span>
-            <span className="text-xs">{expandedSections.businessNav ? '▼' : '▶'}</span>
+            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.businessNav ? 'rotate-90' : 'rotate-0'}`} /></span>
           </div>
-          {expandedSections.businessNav && (
+          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.businessNav ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            <div className="overflow-hidden min-h-0">
             <div className="p-2">
-              {businessNav.map((category, ci) => (
-                <div key={ci}>
-                  <div className="font-semibold text-slate-700 dark:text-slate-200 mt-3 mb-1 pl-2 text-sm">
-                    {category.name}
-                  </div>
-                  {category.children.map((module, mi) => (
-                    <div key={mi}>
-                      <div className="text-sm font-medium text-slate-600 dark:text-slate-300 py-1 pl-4">
-                        {module.name}
-                      </div>
-                      {module.items.map((item, ii) => (
-                        <div
-                          key={ii}
-                          className="text-sm py-1 pl-8 rounded-md hover:bg-primary/10 cursor-pointer transition-all text-slate-500 dark:text-slate-400 hover:text-primary"
-                          onClick={() => {
-                            // 填充对应的 Prompt 到输入框（视觉不变），同时携带业务意图标签给主进程路由
-                            const event = new CustomEvent('fillPrompt', {
-                              detail: { text: `请生成：${item}`, intent: { hint: item } }
-                            })
-                            window.dispatchEvent(event)
-                          }}
-                        >
-                          {item}
-                        </div>
-                      ))}
+              {businessNav.map((category, ci) => {
+                const catOpen = expandedCategories[category.name] ?? (ci === 0)
+                return (
+                  <div key={ci}>
+                    {/* 一级：中心 */}
+                    <div
+                      className="flex items-center justify-between gap-1 font-semibold text-accent mt-2 mb-1 pl-2 pr-1 py-1 text-sm rounded-md cursor-pointer hover:bg-primarySoft"
+                      onClick={() => setExpandedCategories(prev => ({ ...prev, [category.name]: !catOpen }))}
+                    >
+                      <span className="truncate">{category.name}</span>
+                      <CaretRightOutlined className={`shrink-0 text-xs transition-transform duration-300 ${catOpen ? 'rotate-90' : 'rotate-0'}`} />
                     </div>
-                  ))}
-                </div>
-              ))}
+                    {/* 二级：模块 */}
+                    <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${catOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                      <div className="overflow-hidden min-h-0">
+                        {category.children.map((module, mi) => {
+                          const modOpen = expandedModules[module.name] ?? false
+                          return (
+                            <div key={mi}>
+                              <div
+                                className="flex items-center justify-between gap-1 text-sm font-medium text-inkSecondary py-1 pl-4 pr-1 rounded-md cursor-pointer hover:bg-primarySoft"
+                                onClick={() => setExpandedModules(prev => ({ ...prev, [module.name]: !modOpen }))}
+                              >
+                                <span className="truncate">{module.name}</span>
+                                <CaretRightOutlined className={`shrink-0 text-xs transition-transform duration-300 ${modOpen ? 'rotate-90' : 'rotate-0'}`} />
+                              </div>
+                              {/* 三级：功能项 */}
+                              <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${modOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                                <div className="overflow-hidden min-h-0">
+                                  {module.items.map((item, ii) => (
+                                    <div
+                                      key={ii}
+                                      className="text-sm py-1 pl-8 pr-2 rounded-md hover:bg-primarySoft cursor-pointer transition-all text-inkMuted hover:text-primary"
+                                      onClick={() => {
+                                        // 填充对应的 Prompt 到输入框（视觉不变），同时携带业务意图标签给主进程路由
+                                        const event = new CustomEvent('fillPrompt', {
+                                          detail: { text: `请生成：${item}`, intent: { hint: item } }
+                                        })
+                                        window.dispatchEvent(event)
+                                      }}
+                                    >
+                                      {item}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          )}
+            </div>
+          </div>
         </div>
 
         {/* 公共预设指令库 */}
-        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-slate-50 dark:bg-gray-800">
-          <div onClick={() => toggleSection('presets')} className="p-3 bg-slate-100 dark:bg-gray-700 flex justify-between cursor-pointer">
+        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
+          <div onClick={() => toggleSection('presets')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
             <span><StarOutlined /> 公共预设指令库</span>
-            <span className="text-xs">{expandedSections.presets ? '▼' : '▶'}</span>
+            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.presets ? 'rotate-90' : 'rotate-0'}`} /></span>
           </div>
-          {expandedSections.presets && (
-            <div className="p-2 text-sm text-gray-500 text-center py-4">
+          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.presets ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            <div className="overflow-hidden min-h-0">
+            <div className="p-2 text-sm text-inkMuted text-center py-4">
               点击业务导航中的功能即可加载预设指令
             </div>
-          )}
+            </div>
+          </div>
         </div>
       </div>
 

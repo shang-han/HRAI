@@ -74,6 +74,14 @@ declare global {
       }
       app: {
         quit: () => Promise<{ confirmed: boolean }>
+        minimize: () => Promise<void>
+        toggleMaximize: () => Promise<void>
+        close: () => Promise<void>
+        openDevTools: () => Promise<void>
+        zoom: (dir: 'in' | 'out' | 'reset') => Promise<void>
+        about: () => Promise<void>
+        isMaximized: () => Promise<boolean>
+        onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
       }
       company: {
         status: () => Promise<{ completed: boolean; profile?: any; knowledge?: any }>

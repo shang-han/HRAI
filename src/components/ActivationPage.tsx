@@ -35,14 +35,14 @@ const ActivationPage: React.FC<Props> = ({ onActivated }) => {
   }
 
   return (
-    <div className="h-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-gray-900 dark:to-gray-800">
-      <div className="w-full max-w-md p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-xl">
+    <div className="h-full flex items-center justify-center bg-gradient-to-br from-canvas to-indigo-50 dark:to-surface">
+      <div className="w-full max-w-md p-8 bg-surface rounded-2xl shadow-xl">
         <div className="text-center mb-8">
           <div className="text-5xl mb-4">🛡️</div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
+          <h1 className="text-2xl font-bold text-ink mb-2">
             Hermes 人事行政智能专家
           </h1>
-          <p className="text-gray-500 text-sm">请输入激活码以启用系统</p>
+          <p className="text-inkMuted text-sm">请输入激活码以启用系统</p>
         </div>
 
         <div className="space-y-4">
@@ -71,7 +71,7 @@ const ActivationPage: React.FC<Props> = ({ onActivated }) => {
           </Button>
         </div>
 
-        <div className="mt-6 text-center text-xs text-gray-400">
+        <div className="mt-6 text-center text-xs text-inkMuted">
           <p>系统数据全部保存在本地，不会上传至外部服务器</p>
           <p className="mt-1">如需获取激活码，请联系系统管理员</p>
         </div>

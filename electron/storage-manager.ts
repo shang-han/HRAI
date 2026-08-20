@@ -12,6 +12,8 @@ interface Session {
   /** 渠道镜像会话：channel=渠道ID，chatId=渠道会话ID */
   channel?: { channel: string; chatId: string }
   origin?: 'local' | 'channel'
+  /** 系统保留会话（默认会话）：禁止删除 */
+  isDefault?: boolean
 }
 
 interface Message {
@@ -133,7 +135,13 @@ export class StorageManager {
 
     // 如果没有会话，创建一个默认会话
     if (this.sessions.length === 0) {
-      this.createSession('默认会话')
+      const session = this.createSession('默认会话')
+      session.isDefault = true
+      this.saveSessions()
+    } else if (!this.sessions.some(s => s.isDefault)) {
+      // 旧数据迁移：没有任何会话带默认标记时，把第一个会话视为默认（不可删除）
+      this.sessions[0].isDefault = true
+      this.saveSessions()
     }
     this.activeSessionId = this.sessions[0]?.id || null
   }
@@ -240,7 +248,8 @@ export class StorageManager {
       messageCount: s.messages.length,
       workPriority: s.workPriority,
       channel: s.channel,
-      origin: s.origin
+      origin: s.origin,
+      isDefault: !!s.isDefault
     }))
   }
 
@@ -261,6 +270,8 @@ export class StorageManager {
   deleteSession(sessionId: string): boolean {
     const index = this.sessions.findIndex(s => s.id === sessionId)
     if (index === -1) return false
+    // 默认会话是系统保留会话，禁止删除
+    if (this.sessions[index].isDefault) return false
     this.sessions.splice(index, 1)
     if (this.activeSessionId === sessionId) {
       this.activeSessionId = this.sessions[0]?.id || null

@@ -31,6 +31,8 @@ interface Session {
     targetAudience: string
     scenario: string
   }
+  /** 系统保留会话（默认会话）：禁止删除 */
+  isDefault?: boolean
 }
 
 interface SessionState {

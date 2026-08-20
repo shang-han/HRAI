@@ -98,12 +98,12 @@ const TopBar: React.FC = () => {
 
   return (
     <>
-      <div className="h-14 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 bg-white dark:bg-gray-800">
+      <div className="h-14 border-b border-line flex items-center justify-between px-4 bg-surface">
         <div className="flex gap-3 items-center">
           <button onClick={toggleSidebar} className="md:hidden p-1">
             {layout.sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
           </button>
-          <span className="text-sm text-gray-600 dark:text-gray-300">
+          <span className="text-sm text-inkSecondary">
             当前会话：<strong>{activeSession?.name || '无'}</strong>
           </span>
         </div>
@@ -176,7 +176,7 @@ const TopBar: React.FC = () => {
           <Divider />
           <div>
             <h3 className="font-medium mb-2 text-red-500">退出程序</h3>
-            <p className="text-xs text-gray-500 mb-3">
+            <p className="text-xs text-inkMuted mb-3">
               关闭窗口只会将程序最小化到系统托盘并保持服务运行。退出将停止 Hermes 服务与全部渠道 Bot。
             </p>
             <Button
@@ -443,7 +443,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">API 端点</label>
+                  <label className="text-xs text-inkMuted mb-1 block">API 端点</label>
                   <Input
                     value={provider.apiEndpoint}
                     onChange={e => update(i, { apiEndpoint: e.target.value })}
@@ -452,7 +452,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">模型名称</label>
+                  <label className="text-xs text-inkMuted mb-1 block">模型名称</label>
                   <div className="flex gap-2">
                     <Input
                       value={provider.modelName}
@@ -473,7 +473,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                 </div>
                 {modelLists[provider.id] && modelLists[provider.id].length > 0 && (
                   <div className="md:col-span-2">
-                    <label className="text-xs text-gray-500 mb-1 block">
+                    <label className="text-xs text-inkMuted mb-1 block">
                       API 可用模型（选择需要留存的模型，当前使用第一个）
                     </label>
                     <div className="flex gap-2 items-start">
@@ -493,7 +493,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                   </div>
                 )}
                 <div className="md:col-span-2">
-                  <label className="text-xs text-gray-500 mb-1 block">API Key</label>
+                  <label className="text-xs text-inkMuted mb-1 block">API Key</label>
                   <div className="flex gap-2">
                     <Input.Password
                       value={provider.apiKey}
@@ -530,7 +530,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                 {isDialogue && (
                   <>
                     <div className="md:col-span-2">
-                      <label className="text-xs text-gray-500 mb-1 block">
+                      <label className="text-xs text-inkMuted mb-1 block">
                         温度（Temperature）: <span className="font-medium">{provider.params?.temperature ?? 0.7}</span>
                       </label>
                       <Slider
@@ -543,7 +543,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                       />
                     </div>
                     <div className="md:col-span-2">
-                      <label className="text-xs text-gray-500 mb-1 block">最大 Token 数</label>
+                      <label className="text-xs text-inkMuted mb-1 block">最大 Token 数</label>
                       <InputNumber
                         size="small"
                         min={256}
@@ -756,24 +756,24 @@ const ChannelConfigSection: React.FC<{ channel: string }> = ({ channel }) => {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-500">{meta.description}</p>
+      <p className="text-sm text-inkMuted">{meta.description}</p>
       {meta.note && <Alert type="info" message={meta.note} showIcon className="text-xs" />}
 
       {scanSupported && (
-        <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-4 text-center">
+        <div className="rounded-lg border border-dashed border-line p-4 text-center">
           <div className="text-sm font-medium mb-2">扫码自动接入</div>
           {scan.state === 'idle' && (
             <div>
-              <p className="text-xs text-gray-500 mb-3">用手机 {channel === 'weixin' ? '微信' : channel === 'wecom' ? '企业微信' : channel === 'dingtalk' ? '钉钉' : '飞书'} 扫码，自动创建机器人并回填凭据</p>
+              <p className="text-xs text-inkMuted mb-3">用手机 {channel === 'weixin' ? '微信' : channel === 'wecom' ? '企业微信' : channel === 'dingtalk' ? '钉钉' : '飞书'} 扫码，自动创建机器人并回填凭据</p>
               <Button onClick={startScan}>生成接入二维码</Button>
             </div>
           )}
-          {scan.state === 'loading' && <div className="py-4 text-sm text-gray-500">正在生成二维码…</div>}
+          {scan.state === 'loading' && <div className="py-4 text-sm text-inkMuted">正在生成二维码…</div>}
           {scan.state === 'qr' && scan.qrDataUrl && (
             <div className="space-y-2">
-              <img src={scan.qrDataUrl} alt="接入二维码" className="w-52 h-52 mx-auto rounded-lg border border-gray-200 dark:border-gray-700" />
-              <div className="text-xs text-gray-500">请使用手机扫码并确认授权，成功后凭据会自动填入</div>
-              <div className="text-xs text-gray-400">等待扫码授权中…</div>
+              <img src={scan.qrDataUrl} alt="接入二维码" className="w-52 h-52 mx-auto rounded-lg border border-line" />
+              <div className="text-xs text-inkMuted">请使用手机扫码并确认授权，成功后凭据会自动填入</div>
+              <div className="text-xs text-inkMuted">等待扫码授权中…</div>
               <Button size="small" onClick={cancelScan}>取消</Button>
             </div>
           )}
@@ -787,10 +787,10 @@ const ChannelConfigSection: React.FC<{ channel: string }> = ({ channel }) => {
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div className="flex items-center justify-between rounded-lg border border-line p-3">
         <div>
           <div className="text-sm font-medium">启用接入</div>
-          <div className="text-xs text-gray-500 mt-1">保存后自动启动连接器；关闭后停止但不删除配置</div>
+          <div className="text-xs text-inkMuted mt-1">保存后自动启动连接器；关闭后停止但不删除配置</div>
         </div>
         <Switch checked={enabled} onChange={setEnabled} />
       </div>
@@ -799,7 +799,7 @@ const ChannelConfigSection: React.FC<{ channel: string }> = ({ channel }) => {
         <div className="flex items-center gap-2 text-sm">
           <span>连接状态：</span>
           <Tag color={stateColor}>{status.state}</Tag>
-          <span className="text-xs text-gray-500 flex-1">{status.detail}</span>
+          <span className="text-xs text-inkMuted flex-1">{status.detail}</span>
         </div>
       )}
 

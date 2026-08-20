@@ -113,6 +113,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 应用生命周期模块
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
+    // 自绘标题栏窗口控制（minimize / toggleMaximize / close 由主进程执行）
+    minimize: () => ipcRenderer.invoke('app:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize'),
+    close: () => ipcRenderer.invoke('app:close'),
+    openDevTools: () => ipcRenderer.invoke('app:openDevTools'),
+    zoom: (dir: 'in' | 'out' | 'reset') => ipcRenderer.invoke('app:zoom', dir),
+    about: () => ipcRenderer.invoke('app:about'),
+    isMaximized: () => ipcRenderer.invoke('app:isMaximized'),
+    onMaximizedChange: (callback: (maximized: boolean) => void) => {
+      const listener = (_event: any, maximized: boolean) => callback(maximized)
+      ipcRenderer.on('app:maximizedChanged', listener)
+      return () => ipcRenderer.removeListener('app:maximizedChanged', listener)
+    },
   },
 })
 
@@ -178,6 +191,14 @@ export interface ElectronAPI {
   }
   app: {
     quit: () => Promise<any>
+    minimize: () => Promise<void>
+    toggleMaximize: () => Promise<void>
+    close: () => Promise<void>
+    openDevTools: () => Promise<void>
+    zoom: (dir: 'in' | 'out' | 'reset') => Promise<void>
+    about: () => Promise<void>
+    isMaximized: () => Promise<boolean>
+    onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
   }
   company: {
     status: () => Promise<any>
