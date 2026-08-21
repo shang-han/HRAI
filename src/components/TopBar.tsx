@@ -635,7 +635,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                     value={provider.apiEndpoint}
                     onChange={e => update(i, { apiEndpoint: e.target.value })}
                     size="small"
-                    placeholder="https://api.example.com/v1/chat/completions"
+                    placeholder="https://api.example.com/v1 或 .../v1/chat/completions"
                   />
                 </div>
                 <div>
