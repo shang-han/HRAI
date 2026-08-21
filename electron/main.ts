@@ -717,7 +717,7 @@ function registerWindowControlHandlers() {
       type: 'info',
       title: '关于',
       message: 'Hermes 人事行政一体化智能专家',
-      detail: '版本 1.0.0\n面向中小企业的人事+行政一体化 AI 智能助手',
+      detail: `版本 ${app.getVersion()}\n面向中小企业的人事+行政一体化 AI 智能助手`,
       buttons: ['确定']
     }).catch(() => {})
   })
