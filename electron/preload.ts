@@ -30,10 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 聊天模块
   chat: {
-    send: (message: string, sessionId: string, modelOverride?: string, intent?: any) =>
-      ipcRenderer.invoke('chat:send', message, sessionId, modelOverride, intent),
-    stream: (message: string, sessionId: string, modelOverride?: string, intent?: any) =>
-      ipcRenderer.invoke('chat:stream', message, sessionId, modelOverride, intent),
+    send: (message: string, sessionId: string, modelOverride?: string, images?: string[], intent?: any) =>
+      ipcRenderer.invoke('chat:send', message, sessionId, modelOverride, images, intent),
+    stream: (message: string, sessionId: string, modelOverride?: string, images?: string[], intent?: any) =>
+      ipcRenderer.invoke('chat:stream', message, sessionId, modelOverride, images, intent),
     stop: () => ipcRenderer.invoke('chat:stop'),
     command: (command: string, sessionId: string) =>
       ipcRenderer.invoke('chat:command', command, sessionId),

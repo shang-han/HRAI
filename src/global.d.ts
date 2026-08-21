@@ -29,9 +29,9 @@ declare global {
         deleteWorkPriorityHistory: (sessionId: string, historyIndex: number) => Promise<boolean>
       }
       chat: {
-        send: (message: string, sessionId: string, modelOverride?: string, intent?: { hint?: string; id?: string }) =>
+        send: (message: string, sessionId: string, modelOverride?: string, images?: string[], intent?: { hint?: string; id?: string }) =>
           Promise<{ success: boolean; content?: string; error?: string }>
-        stream: (message: string, sessionId: string, modelOverride?: string, intent?: { hint?: string; id?: string }) =>
+        stream: (message: string, sessionId: string, modelOverride?: string, images?: string[], intent?: { hint?: string; id?: string }) =>
           Promise<{ channel: string }>
         stop: () => Promise<boolean>
         command: (command: string, sessionId: string) =>
