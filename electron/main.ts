@@ -747,18 +747,30 @@ function getFileFilters(format: string) {
   return filters[format] || [{ name: '所有文件', extensions: ['*'] }]
 }
 
-// 应用生命周期
-app.whenReady().then(() => {
-  // 系统关机/注销时放行关闭，避免隐藏窗口逻辑阻止系统关机
-  powerMonitor.on('shutdown', () => {
-    isQuitting = true
-    channelManager?.stopAll().finally(() => hermesManager?.stop())
+// 单实例锁：避免用户重复启动导致 Hermes 服务/渠道 Bot 多开
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  app.quit()
+} else {
+  // 已有实例运行时，第二次启动只唤起主窗口，不创建新实例
+  app.on('second-instance', () => {
+    showMainWindow()
   })
 
-  createTray()
-  setupAppMenu()
-  initializeApp()
-})
+  // 应用生命周期
+  app.whenReady().then(() => {
+    // 系统关机/注销时放行关闭，避免隐藏窗口逻辑阻止系统关机
+    powerMonitor.on('shutdown', () => {
+      isQuitting = true
+      channelManager?.stopAll().finally(() => hermesManager?.stop())
+    })
+
+    createTray()
+    setupAppMenu()
+    initializeApp()
+  })
+}
 
 // 常驻后台：窗口全部关闭时不退出、不停止服务。
 // 真正的退出只能通过托盘菜单 / 系统设置中的“退出并停止服务”（requestQuit）。
