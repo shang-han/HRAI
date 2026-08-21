@@ -95,10 +95,12 @@ const App: React.FC = () => {
   }
 
   // 统一外壳：所有页面（激活/引导/加载/主界面）顶部都带自绘标题栏
+  // 无边框窗口自绘一圈窗口边框（主题淡灰，与卡片边框同色，柔和）+ 圆角窗口
+  // 根背景用 surface：聊天区灰色卡片左右留出间距后，两侧露出的是面板色
   const withFrame = (content: React.ReactNode) => (
-    <div className="h-screen flex flex-col overflow-hidden bg-canvas">
+    <div className="h-screen flex flex-col overflow-hidden bg-surface border border-line rounded-xl">
       <TitleBar />
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{content}</div>
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden rounded-b-xl">{content}</div>
     </div>
   )
 

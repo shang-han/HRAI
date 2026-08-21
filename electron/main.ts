@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, powerMonitor } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, powerMonitor, screen } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { HermesManager } from './hermes-manager'
@@ -26,6 +26,11 @@ let tray: Tray | null = null
 let isQuitting = false
 let closeToTrayHintShown = false
 
+// 窗口最大化动画：手动对 bounds 做缓动插值，避免 Windows 原生瞬时跳变
+let animTimer: ReturnType<typeof setInterval> | null = null
+let manualMaximized = false
+let savedNormalBounds: Electron.Rectangle | null = null
+
 // 渲染端会话 -> Hermes ACP 会话 映射
 const hermesSessions = new Map<string, string>()
 // ACP 审批请求 -> Promise resolve
@@ -46,8 +51,11 @@ function createWindow() {
     },
     // 无边框窗口：标题栏由渲染层自绘（图标+系统名称+中文菜单同行）。
     // frame: false 去掉标题栏，thickFrame: false 再去掉 Windows 标准细边框与阴影。
+    // transparent: 窗口透明，配合渲染层圆角实现真正的圆角窗口（角外透出桌面）。
     frame: false,
     thickFrame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
     show: false
   })
 
@@ -715,14 +723,7 @@ function registerWindowControlHandlers() {
     mainWindow?.minimize()
   })
 
-  ipcMain.handle('app:toggleMaximize', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize()
-    } else {
-      mainWindow.maximize()
-    }
-  })
+  ipcMain.handle('app:toggleMaximize', () => toggleMaximizeAnimated())
 
   // 关闭窗口：走与点 X 相同的 close 事件 → 隐藏到托盘，服务继续运行
   ipcMain.handle('app:close', () => {
@@ -735,7 +736,7 @@ function registerWindowControlHandlers() {
 
   // 查询窗口是否最大化（渲染层据此切换"最大化/还原"图标）
   ipcMain.handle('app:isMaximized', () => {
-    return mainWindow?.isMaximized() ?? false
+    return manualMaximized || (mainWindow?.isMaximized() ?? false)
   })
 
   ipcMain.handle('app:zoom', (_event, dir: 'in' | 'out' | 'reset') => {
@@ -755,6 +756,62 @@ function registerWindowControlHandlers() {
       detail: `版本 ${app.getVersion()}\n面向中小企业的人事+行政一体化 AI 智能助手`,
       buttons: ['确定']
     }).catch(() => {})
+  })
+}
+
+/**
+ * 最大化/还原慢动画：手动对窗口 bounds 做缓动插值。
+ * 状态由 manualMaximized 自行维护，并通过 maximizedChanged 推送，
+ * 标题栏按钮图标随之切换；双击标题栏、窗口菜单都走这里。
+ */
+async function toggleMaximizeAnimated(): Promise<void> {
+  const win = mainWindow
+  if (!win || win.isDestroyed() || animTimer) return
+
+  // 原生最大化（如 Win+↑ / 系统贴靠）直接还原，不走手动动画
+  if (win.isMaximized()) {
+    win.unmaximize()
+    return
+  }
+
+  if (manualMaximized) {
+    manualMaximized = false
+    const target = savedNormalBounds || { x: 100, y: 100, width: 1400, height: 900 }
+    await animateWindowTo(target, 350)
+  } else {
+    savedNormalBounds = win.getBounds()
+    manualMaximized = true
+    const workArea = screen.getDisplayMatching(savedNormalBounds).workArea
+    await animateWindowTo(workArea, 350)
+  }
+  win.webContents.send('app:maximizedChanged', manualMaximized)
+}
+
+/** 对窗口位置/尺寸做 ease-out 缓动插值动画 */
+function animateWindowTo(target: Electron.Rectangle, duration: number): Promise<void> {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return Promise.resolve()
+
+  const start = win.getBounds()
+  const startTime = Date.now()
+
+  return new Promise((resolve) => {
+    animTimer = setInterval(() => {
+      const t = Math.min((Date.now() - startTime) / duration, 1)
+      const ease = 1 - Math.pow(1 - t, 3) // ease-out cubic，末尾减速更自然
+      const bounds = {
+        x: Math.round(start.x + (target.x - start.x) * ease),
+        y: Math.round(start.y + (target.y - start.y) * ease),
+        width: Math.round(start.width + (target.width - start.width) * ease),
+        height: Math.round(start.height + (target.height - start.height) * ease),
+      }
+      win.setBounds(bounds)
+      if (t >= 1 && animTimer) {
+        clearInterval(animTimer)
+        animTimer = null
+        resolve()
+      }
+    }, 16)
   })
 }
 

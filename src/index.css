@@ -16,16 +16,27 @@
   box-sizing: border-box;
 }
 
+/* preflight 已关闭，补上它的边框基础样式：
+   默认实线 0 宽，Tailwind 的 border / border-<颜色> 工具类才能正常渲染 */
+*, *::before, *::after {
+  border-style: solid;
+  border-width: 0;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  background: transparent; /* 窗口透明：圆角外的区域透出桌面 */
 }
 
 /* antd App 包装层需撑满高度，否则内部 h-full 链会断裂导致页面随内容生长 */
 .ant-app {
   height: 100%;
   overflow: hidden;
+  /* antd 运行时注入的样式会为它设置背景色（浅色白/深色黑），
+     其方角会盖到窗口圆角外，强制透明（!important 压住注入顺序） */
+  background: transparent !important;
 }
 
 body {

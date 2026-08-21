@@ -161,7 +161,7 @@ const TopBar: React.FC = () => {
     }).catch(() => {})
 
     window.electronAPI.update.check().then(info => {
-      if (mounted && info?.hasUpdate) {
+      if (mounted && info?.hasUpdate && info?.downloadUrl) {
         setUpdateInfo(info)
         setUpdateModalOpen(true)
       }
@@ -183,7 +183,7 @@ const TopBar: React.FC = () => {
 
   return (
     <>
-      <div className="h-14 border-b border-line flex items-center justify-between px-4 bg-surface">
+      <div className="h-14 flex items-center justify-between px-4 bg-surface">
         <div className="flex gap-3 items-center">
           <button onClick={toggleSidebar} className="md:hidden p-1">
             {layout.sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
@@ -336,7 +336,7 @@ const TopBar: React.FC = () => {
               <p>更新策略：<strong>{updateInfo.updateType === 'incremental' ? '增量更新（小改动）' : '全量更新（大改动）'}</strong></p>
             )}
             {updateInfo.hasUpdate && updateInfo.releaseNotes && (
-              <div className="text-xs text-gray-500 whitespace-pre-wrap max-h-40 overflow-auto bg-slate-50 dark:bg-gray-900 p-2 rounded">
+              <div className="text-xs text-inkMuted whitespace-pre-wrap max-h-40 overflow-auto bg-canvas p-2 rounded">
                 {updateInfo.releaseNotes}
               </div>
             )}
@@ -371,7 +371,7 @@ const TopBar: React.FC = () => {
         </p>
         <div className="text-xs text-gray-500 mb-2">{permissionRequest?.description}</div>
         {permissionRequest?.command && (
-          <div className="rounded bg-slate-100 dark:bg-gray-900 border border-slate-200 dark:border-gray-700 p-3 font-mono text-xs break-all whitespace-pre-wrap">
+          <div className="rounded bg-surfaceSubtle dark:bg-canvas border border-line p-3 font-mono text-xs break-all whitespace-pre-wrap">
             {permissionRequest.command}
           </div>
         )}

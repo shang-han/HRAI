@@ -52,7 +52,8 @@ const ChatArea: React.FC = () => {
 
   if (messages.length === 0) {
     return (
-      <div className="flex-1 overflow-auto min-h-0 p-4 flex items-center justify-center">
+      <div className="flex-1 min-h-0 mx-4 bg-canvas rounded-xl overflow-hidden">
+      <div className="h-full overflow-auto p-4 flex items-center justify-center">
         <div className="text-center max-w-md">
           <div className="text-6xl mb-4">🤖</div>
           <h2 className="text-xl font-semibold text-ink mb-2">
@@ -82,17 +83,20 @@ const ChatArea: React.FC = () => {
           </div>
         </div>
       </div>
+      </div>
     )
   }
 
   return (
+    <div className="flex-1 min-h-0 mx-4 bg-canvas rounded-xl overflow-hidden flex flex-col">
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       className="flex-1 overflow-auto min-h-0"
     >
       {/* min-h-full + justify-end：内容不满屏时贴在底部（紧挨输入框），满屏后正常滚动 */}
-      <div className="min-h-full flex flex-col justify-end p-4 space-y-4">
+      {/* 聊天区为内缩的灰色圆角卡片：左右留白，内容在卡片内再留 16px */}
+      <div className="min-h-full flex flex-col justify-end py-4 px-4 space-y-4">
       {messages.map((message) => (
         <div
           key={message.id}
@@ -166,6 +170,7 @@ const ChatArea: React.FC = () => {
         </div>
       )}
       </div>
+    </div>
     </div>
   )
 }
