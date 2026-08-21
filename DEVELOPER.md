@@ -71,6 +71,23 @@ npm run electron:build
 生成 `release/Hermes人事行政智能专家 Setup 1.0.0.exe`。
 注意：完整安装包需要 `resources/hermes/python`、`git`、`site-packages` 均已就绪。
 
+## macOS 打包
+
+macOS 安装包必须在 macOS 机器或 macOS CI 上构建：
+
+```bash
+npm run build:mac
+```
+
+生成的产物在 `release/` 下，包含 `.dmg` 和 `.zip`。
+
+代码已做平台自适应：
+
+- macOS/Linux 优先使用系统 `python3` 和 `/bin/bash`；
+- 可通过 `HERMES_PYTHON` / `HERMES_SHELL` 环境变量覆盖；
+- macOS 包只复制 `hermes-agent`、`workstation`、`setup.py` 到资源目录，不携带 Windows 版 Python/Git/site-packages；
+- Gitee 更新器会自动按当前平台匹配 `.exe` / `.dmg` / `.AppImage`。
+
 ## Gitee 发布与增量更新
 
 1. 全量构建前，把上一版本的 `release/win-unpacked` 备份为 `release/prev-win-unpacked`

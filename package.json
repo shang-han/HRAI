@@ -10,6 +10,8 @@
     "build": "node build-main.mjs && vite build",
     "electron:dev": "node build-main.mjs && concurrently \"vite\" \"wait-on http://localhost:5173 && set NODE_ENV=development&&electron .\"",
     "electron:build": "node build-main.mjs && vite build && electron-builder",
+    "build:mac": "node build-main.mjs && vite build && electron-builder --mac",
+    "build:mac:dir": "node build-main.mjs && vite build && electron-builder --mac dir",
     "make:delta": "node scripts/make-delta-package.mjs",
     "publish:gitee": "node scripts/publish-gitee-release.mjs"
   },
@@ -70,18 +72,37 @@
       "!resources/hermes/site-packages/**/*",
       "!resources/hermes/git/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "resources/hermes",
-        "to": "hermes",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "win": {
       "target": "nsis",
-      "icon": "resources/icon.ico"
+      "icon": "resources/icon.ico",
+      "extraResources": [
+        {
+          "from": "resources/hermes",
+          "to": "hermes",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.business",
+      "identity": null,
+      "extraResources": [
+        {
+          "from": "resources/hermes",
+          "to": "hermes",
+          "filter": [
+            "hermes-agent/**/*",
+            "workstation/**/*",
+            "setup.py"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

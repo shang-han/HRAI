@@ -22,7 +22,11 @@ const repo = process.env.GITEE_REPO || 'hrai'
 // 也可以使用 RELEASE_VERSION 环境变量覆盖。
 const version = (process.env.RELEASE_VERSION || pkg.version).trim().replace(/^v/i, '')
 const tag = `v${version}`
-const releaseFile = process.env.RELEASE_FILE || path.resolve(`release/Hermes人事行政智能专家 Setup ${version}.exe`)
+const platformExt = process.platform === 'darwin' ? '.dmg' : process.platform === 'linux' ? '.AppImage' : '.exe'
+const defaultReleaseFile = process.platform === 'win32'
+  ? `release/Hermes人事行政智能专家 Setup ${version}${platformExt}`
+  : `release/Hermes人事行政智能专家-${version}${platformExt}`
+const releaseFile = process.env.RELEASE_FILE || path.resolve(defaultReleaseFile)
 if (!fs.existsSync(releaseFile)) {
   console.error('未找到安装包:', releaseFile)
   process.exit(1)

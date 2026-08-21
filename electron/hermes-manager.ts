@@ -51,6 +51,7 @@ export class HermesManager {
   private gatewayProcess: ChildProcess | null = null
   private gatewayStarting: Promise<void> | null = null
   private channelSyncProcess: ChildProcess | null = null
+  private usingSystemPython = false
   private basePath: string
   private hermesPath: string
   private pythonPath: string
@@ -63,18 +64,29 @@ export class HermesManager {
   constructor(logManager: any) {
     this.logManager = logManager
 
-    // 本地便携部署：资源统一放在应用目录内部，不依赖系统全局 PATH。
+    // 本地便携部署：资源优先放在应用资源目录内部；
+    // Windows 继续使用内置 Python + Git Bash，macOS/Linux 优先使用系统 python3/bash。
     const isPacked = app.isPackaged
     const appRoot = isPacked ? path.dirname(app.getPath('exe')) : app.getAppPath()
-    const basePath = isPacked
-      ? path.join(process.resourcesPath, 'hermes')
-      : path.join(appRoot, 'resources', 'hermes')
+    const resourceRoot = isPacked ? process.resourcesPath : path.join(appRoot, 'resources')
+    const preferredName = process.platform === 'darwin'
+      ? 'hermes-darwin'
+      : process.platform === 'linux'
+        ? 'hermes-linux'
+        : 'hermes'
+    const preferredBase = path.join(resourceRoot, preferredName)
+    const basePath = fs.existsSync(preferredBase)
+      ? preferredBase
+      : path.join(resourceRoot, 'hermes')
 
     this.basePath = basePath
-    this.pythonPath = path.join(basePath, 'python', 'python.exe')
+    this.pythonPath = this.resolvePythonPath(basePath)
     this.hermesPath = path.join(basePath, 'hermes-agent')
-    this.gitBashPath = path.join(basePath, 'git', 'bin', 'bash.exe')
-    this.workspacePath = path.join(appRoot, 'workspace')
+    this.gitBashPath = this.resolveShellPath(basePath)
+    // Windows 沿用安装目录/开发目录下的 workspace；macOS/Linux 写到 userData，避免写入 .app 只读目录。
+    this.workspacePath = process.platform === 'win32'
+      ? path.join(appRoot, 'workspace')
+      : path.join(app.getPath('userData'), 'workspace')
     this.configDir = path.join(app.getPath('userData'), 'hermes-config')
     this.configPath = path.join(this.configDir, 'config.yaml')
     this.envPath = path.join(this.configDir, '.env')
@@ -88,6 +100,36 @@ export class HermesManager {
     }
   }
 
+  private resolvePythonPath(basePath: string): string {
+    const candidates = process.platform === 'win32'
+      ? [path.join(basePath, 'python', 'python.exe')]
+      : [
+          path.join(basePath, 'python', 'bin', 'python3'),
+          path.join(basePath, 'python', 'python3'),
+          path.join(basePath, 'python', 'bin', 'python'),
+          path.join(basePath, 'python', 'python')
+        ]
+    const bundled = candidates.find(p => fs.existsSync(p))
+    if (bundled) return bundled
+
+    // 非 Windows 且没有内置 Python 时，使用系统 Python。
+    if (process.platform !== 'win32') {
+      this.usingSystemPython = true
+      return process.env.HERMES_PYTHON || 'python3'
+    }
+    return candidates[0] || ''
+  }
+
+  private resolveShellPath(basePath: string): string {
+    if (process.platform === 'win32') {
+      return path.join(basePath, 'git', 'bin', 'bash.exe')
+    }
+    const bundledShell = path.join(basePath, 'git', 'bin', 'bash')
+    return fs.existsSync(bundledShell)
+      ? bundledShell
+      : process.env.HERMES_SHELL || '/bin/bash'
+  }
+
   get isRunning() { return this._isRunning }
 
   /**
@@ -96,20 +138,38 @@ export class HermesManager {
    * 都会造成同一渠道双通道抢消息。
    */
   async killLegacyGatewayProcesses(): Promise<void> {
-    if (process.platform !== 'win32') return
+    if (process.platform === 'win32') {
+      try {
+        const { stdout } = await this.execAsync(
+          "wmic process where \"name='python.exe'\" get ProcessId,CommandLine",
+          { windowsHide: true }
+        )
+        for (const rawLine of (stdout || '').split(String.fromCharCode(10))) {
+          const line = rawLine.trim()
+          if (!line || !/gateway\.run|channel_sync\.py/i.test(line)) continue
+          // 只清理本应用相关进程，避免误杀其他项目的 Hermes
+          if (!/hermes-hr-admin|resources.*hermes.*python/i.test(line)) continue
+          const parts = line.split(/\s+/)
+          const pid = Number(parts[parts.length - 1])
+          if (!Number.isInteger(pid) || pid <= 0) continue
+          try {
+            process.kill(pid, 'SIGKILL')
+            this.logManager?.info(`已清理旧版 Hermes gateway/channel_sync 进程: ${pid}`)
+          } catch { /* ignore */ }
+        }
+      } catch { /* 没有残留进程或清理失败都不影响启动 */ }
+      return
+    }
 
+    // macOS/Linux：用 ps 查找并清理本应用相关的 gateway/channel_sync 残留进程。
     try {
-      const { stdout } = await this.execAsync(
-        "wmic process where \"name='python.exe'\" get ProcessId,CommandLine",
-        { windowsHide: true }
-      )
+      const { stdout } = await this.execAsync('ps -axo pid=,command=', {})
       for (const rawLine of (stdout || '').split(String.fromCharCode(10))) {
         const line = rawLine.trim()
         if (!line || !/gateway\.run|channel_sync\.py/i.test(line)) continue
-        // 只清理本应用相关进程，避免误杀其他项目的 Hermes
-        if (!/hermes-hr-admin|resources.*hermes.*python/i.test(line)) continue
+        if (!/hermes-hr-admin|resources.*hermes|acp_adapter/i.test(line)) continue
         const parts = line.split(/\s+/)
-        const pid = Number(parts[parts.length - 1])
+        const pid = Number(parts[0])
         if (!Number.isInteger(pid) || pid <= 0) continue
         try {
           process.kill(pid, 'SIGKILL')
@@ -215,6 +275,36 @@ export class HermesManager {
   }
 
   private buildIsolatedEnv(): NodeJS.ProcessEnv {
+    if (process.platform !== 'win32') {
+      const pythonDir = this.usingSystemPython ? '' : path.dirname(this.pythonPath)
+
+      const pathEntries = [
+        ...(pythonDir ? [pythonDir] : []),
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin'
+      ].filter(Boolean)
+
+      return {
+        ...(pythonDir ? { PYTHONHOME: pythonDir } : {}),
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONNOUSERSITE: '1',
+        PYTHONDONTWRITEBYTECODE: '1',
+        PATH: pathEntries.join(path.delimiter),
+        HERMES_HOME: this.configDir,
+        HERMES_GIT_BASH_PATH: this.gitBashPath,
+        SHELL: this.gitBashPath,
+        TERMINAL_CWD: this.workspacePath,
+        GATEWAY_ALLOW_ALL_USERS: 'true',
+        HOME: app.getPath('home'),
+        TEMP: app.getPath('temp'),
+        TMP: app.getPath('temp')
+      }
+    }
+
     const pythonDir = path.dirname(this.pythonPath)
     const gitRoot = path.dirname(path.dirname(this.gitBashPath))
     const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows'
@@ -253,7 +343,6 @@ export class HermesManager {
       TMP: app.getPath('temp'),
     }
   }
-
   // ============ ACP Protocol ============
 
   /**

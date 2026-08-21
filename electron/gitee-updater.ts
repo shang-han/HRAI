@@ -61,6 +61,22 @@ export class GiteeUpdater {
     this.onProgress = handler
   }
 
+  private getPlatformExt(): string {
+    if (process.platform === 'darwin') return '.dmg'
+    if (process.platform === 'linux') return '.AppImage'
+    return '.exe'
+  }
+
+  private isPlatformAsset(name: string): boolean {
+    const ext = this.getPlatformExt().toLowerCase()
+    return String(name || '').toLowerCase().endsWith(ext)
+  }
+
+  private isPlatformPartAsset(name: string): boolean {
+    const ext = this.getPlatformExt().toLowerCase()
+    return String(name || '').toLowerCase().includes(ext + '.part')
+  }
+
   private validateConfig(): UpdateConfig {
     const cfg = this.getConfig()
     const owner = (cfg.owner || '').trim()
@@ -107,13 +123,14 @@ export class GiteeUpdater {
     const latestVersion = versionMatch ? versionMatch[1] : rawVersion.replace(/^v/i, '').trim()
     const currentVersion = app.getVersion().trim()
     const assets: any[] = Array.isArray(release.assets) ? release.assets : []
-    const exactExe = assets.find((a: any) => /\.exe$/i.test(a.name || ''))
-    const firstPart = assets.find((a: any) => /\.exe\.part\d+$/i.test(a.name || ''))
-    const exeAsset = exactExe || assets[0]
-    const downloadUrl = String(exactExe?.browser_download_url || release.assets_url || '')
+    const platformExt = this.getPlatformExt()
+    const exactAsset = assets.find((a: any) => this.isPlatformAsset(String(a.name || '')))
+    const firstPart = assets.find((a: any) => this.isPlatformPartAsset(String(a.name || '')))
+    const asset = exactAsset || assets[0]
+    const downloadUrl = String(exactAsset?.browser_download_url || release.assets_url || '')
 
-    let fileName = String(exeAsset?.name || `Hermes-Setup-${latestVersion}.exe`)
-    if (!exactExe && firstPart) {
+    let fileName = String(asset?.name || `Hermes-Setup-${latestVersion}${platformExt}`)
+    if (!exactAsset && firstPart) {
       fileName = String(firstPart.name).replace(/\.part\d+$/i, '')
     }
 
@@ -139,8 +156,8 @@ export class GiteeUpdater {
       assets.find((a: any) => /^delta-.*\.zip$/i.test(a.name || ''))
     const deltaUrl = String(deltaAsset?.browser_download_url || '')
     const deltaSize = Number(deltaAsset?.size || 0)
-    const fullSize = exactExe
-      ? Number(exactExe.size || 0)
+    const fullSize = exactAsset
+      ? Number(exactAsset.size || 0)
       : parts.reduce((sum, part) => sum + part.size, 0)
 
     // 策略：同 major.minor 版本线且增量包存在，并且增量包明显小于全量包时使用增量；
@@ -238,7 +255,7 @@ export class GiteeUpdater {
 
   /**
    * 安装更新：
-   * - 全量：启动下载好的 NSIS 安装程序
+   * - 全量：Windows 启动 NSIS 安装程序，macOS 打开 DMG，Linux 打开 AppImage
    * - 增量：解压变更文件到安装目录，删除已移除文件，然后重启应用
    */
   async install(filePath: string, updateType: 'incremental' | 'full' = 'full'): Promise<void> {
@@ -251,6 +268,9 @@ export class GiteeUpdater {
       return
     }
 
+    if (process.platform === 'linux' && /\.[Aa]pp[Ii]mage$/.test(filePath)) {
+      fs.chmodSync(filePath, 0o755)
+    }
     await shell.openPath(filePath)
   }
 
