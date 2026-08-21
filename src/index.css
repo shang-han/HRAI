@@ -23,6 +23,13 @@
   border-width: 0;
 }
 
+/* preflight 已关闭，补上它的表单字体继承：
+   浏览器对 input/textarea/select 默认不继承页面字体（否则会
+   一直用系统默认字体，与页面 Noto Sans SC 不一致） */
+input, textarea, select {
+  font: inherit;
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;
@@ -40,7 +47,7 @@ html, body, #root {
 }
 
 body {
-  font-family: 'Inter', 'Microsoft YaHei', system-ui, sans-serif;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

@@ -68,6 +68,7 @@
       "dist/**/*",
       "dist-electron/**/*",
       "resources/**/*",
+      "LICENSE-OFL-NotoSansSC.txt",
       "!resources/hermes/python/**/*",
       "!resources/hermes/site-packages/**/*",
       "!resources/hermes/git/**/*"

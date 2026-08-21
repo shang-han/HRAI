@@ -24,6 +24,8 @@ function Root() {
         token: {
           colorPrimary: getCssVar('--color-primary', '#4F46E5'),
           borderRadius: 8,
+          // 与 index.css body 字体一致（antd 会用它生成 .ant-app 的 font-family）
+          fontFamily: "'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif",
         }
       }}
     >

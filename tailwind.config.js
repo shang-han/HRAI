@@ -28,7 +28,7 @@ export default {
         inkMuted: 'var(--color-ink-muted)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif']
+        sans: ['Noto Sans SC', 'Microsoft YaHei', 'system-ui', 'sans-serif']
       }
     },
   },

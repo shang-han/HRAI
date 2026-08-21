@@ -18,6 +18,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     rename: (sessionId: string, name: string) => ipcRenderer.invoke('session:rename', sessionId, name),
     getMessages: (sessionId: string) => ipcRenderer.invoke('session:getMessages', sessionId),
     saveMessage: (sessionId: string, message: any) => ipcRenderer.invoke('session:saveMessage', sessionId, message),
+    setWorkPriority: (sessionId: string, data: { title: string; background: string; targetAudience: string; scenario: string }) =>
+      ipcRenderer.invoke('session:setWorkPriority', sessionId, data),
+    restoreWorkPriority: (sessionId: string, historyIndex: number) =>
+      ipcRenderer.invoke('session:restoreWorkPriority', sessionId, historyIndex),
+    clearWorkPriority: (sessionId: string) =>
+      ipcRenderer.invoke('session:clearWorkPriority', sessionId),
+    deleteWorkPriorityHistory: (sessionId: string, historyIndex: number) =>
+      ipcRenderer.invoke('session:deleteWorkPriorityHistory', sessionId, historyIndex),
   },
 
   // 聊天模块
@@ -168,6 +176,10 @@ export interface ElectronAPI {
     rename: (sessionId: string, name: string) => Promise<any>
     getMessages: (sessionId: string) => Promise<any>
     saveMessage: (sessionId: string, message: any) => Promise<any>
+    setWorkPriority: (sessionId: string, data: { title: string; background: string; targetAudience: string; scenario: string }) => Promise<any>
+    restoreWorkPriority: (sessionId: string, historyIndex: number) => Promise<boolean>
+    clearWorkPriority: (sessionId: string) => Promise<boolean>
+    deleteWorkPriorityHistory: (sessionId: string, historyIndex: number) => Promise<boolean>
   }
   chat: {
     send: (message: string, sessionId: string, modelOverride?: string, intent?: any) => Promise<any>

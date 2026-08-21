@@ -359,6 +359,87 @@ export class StorageManager {
     return this.sessions.find(s => s.id === sessionId)
   }
 
+  /**
+   * 保存会话的近期重点工作：旧的（非空）自动归档进历史（最多 10 条）
+   */
+  setWorkPriority(
+    sessionId: string,
+    data: { title: string; background: string; targetAudience: string; scenario: string }
+  ): WorkPriority | null {
+    const session = this.sessions.find(s => s.id === sessionId)
+    if (!session) return null
+
+    const wp: WorkPriority = {
+      title: data.title || '',
+      background: data.background || '',
+      targetAudience: data.targetAudience || '',
+      scenario: data.scenario || '',
+      createdAt: new Date().toISOString()
+    }
+
+    const current = session.workPriority
+    if (current && (current.title || current.background)) {
+      const history = current.history || []
+      history.unshift({ ...current, history: undefined })
+      wp.history = history.slice(0, 10)
+    }
+
+    session.workPriority = wp
+    session.updatedAt = new Date().toISOString()
+    this.saveSessions()
+    return wp
+  }
+
+  /**
+   * 删除历史中的单条版本
+   */
+  deleteWorkPriorityHistory(sessionId: string, historyIndex: number): boolean {
+    const session = this.sessions.find(s => s.id === sessionId)
+    const history = session?.workPriority?.history
+    if (!history || !history[historyIndex]) return false
+    history.splice(historyIndex, 1)
+    session.updatedAt = new Date().toISOString()
+    this.saveSessions()
+    return true
+  }
+
+  /**
+   * 删除会话的近期重点工作（含历史版本）
+   */
+  clearWorkPriority(sessionId: string): boolean {
+    const session = this.sessions.find(s => s.id === sessionId)
+    if (!session) return false
+    session.workPriority = undefined
+    session.updatedAt = new Date().toISOString()
+    this.saveSessions()
+    return true
+  }
+
+  /**
+   * 从历史恢复一条重点工作：目标条目回到当前，旧的当前（非空）归档
+   */
+  restoreWorkPriority(sessionId: string, historyIndex: number): boolean {
+    const session = this.sessions.find(s => s.id === sessionId)
+    const current = session?.workPriority
+    if (!current?.history || !current.history[historyIndex]) return false
+
+    const target = current.history[historyIndex]
+    const history = [...current.history]
+    history.splice(historyIndex, 1)
+    if (current.title || current.background) {
+      history.unshift({ ...current, history: undefined })
+    }
+
+    session.workPriority = {
+      ...target,
+      history: history.slice(0, 10),
+      createdAt: new Date().toISOString()
+    }
+    session.updatedAt = new Date().toISOString()
+    this.saveSessions()
+    return true
+  }
+
   private saveSessions() {
     this.saveJson(this.sessionFile, this.sessions)
   }

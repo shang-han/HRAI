@@ -23,6 +23,10 @@ declare global {
           content: string; timestamp: string; model?: string; images?: string[]
         }>>
         saveMessage: (sessionId: string, message: any) => Promise<boolean>
+        setWorkPriority: (sessionId: string, data: { title: string; background: string; targetAudience: string; scenario: string }) => Promise<any>
+        restoreWorkPriority: (sessionId: string, historyIndex: number) => Promise<boolean>
+        clearWorkPriority: (sessionId: string) => Promise<boolean>
+        deleteWorkPriorityHistory: (sessionId: string, historyIndex: number) => Promise<boolean>
       }
       chat: {
         send: (message: string, sessionId: string, modelOverride?: string, intent?: { hint?: string; id?: string }) =>

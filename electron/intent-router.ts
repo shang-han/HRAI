@@ -80,9 +80,11 @@ export class IntentRouter {
   private startedAt = new Map<string, number>()
   private endedAt = new Set<string>()
   private companyProfile: any = null
+  private storageManager: any = null
 
   constructor(logManager: any, storageManager?: any) {
     this.logManager = logManager
+    this.storageManager = storageManager || null
     this.companyProfile = storageManager?.getCompanyProfile?.() || null
     const dataDir = path.join(app.getPath('userData'), 'data')
     if (!fs.existsSync(dataDir)) {
@@ -114,12 +116,16 @@ export class IntentRouter {
    * 装配发送给 Hermes 的提示词。界面原文不变，这里生成内部任务信封。
    */
   prepare(original: string, meta?: IntentMeta, sessionId?: string): PreparedIntent {
+    // 会话的近期重点工作：无论是否命中业务意图，都作为上下文注入 prompt
+    const workPriority = sessionId
+      ? this.storageManager?.getSessionById?.(sessionId)?.workPriority
+      : null
     const match = this.match(original, meta)
 
     if (!match) {
       return {
         taskId: this.makeTaskId(),
-        prompt: original,
+        prompt: this.withWorkPriorityContext(original, workPriority),
         matched: false,
         source: 'none',
         matchedBy: '',
@@ -129,7 +135,10 @@ export class IntentRouter {
     }
 
     const intent = match.intent
-    const prompt = this.buildPrompt(original, intent, match.source, match.matchedBy)
+    const prompt = this.withWorkPriorityContext(
+      this.buildPrompt(original, intent, match.source, match.matchedBy),
+      workPriority
+    )
 
     return {
       taskId: this.makeTaskId(),
@@ -141,6 +150,22 @@ export class IntentRouter {
       original,
       sessionId
     }
+  }
+
+  /**
+   * 把近期重点工作作为上下文注入 prompt 开头，
+   * 让 AI 输出贴合当前项目背景（无内容时不注入）。
+   */
+  private withWorkPriorityContext(prompt: string, wp: any): string {
+    if (!wp || (!wp.title && !wp.background)) return prompt
+    const lines: string[] = []
+    lines.push('【近期重点工作（回答与生成内容请贴合以下背景）】')
+    if (wp.title) lines.push(`- 标题：${wp.title}`)
+    if (wp.background) lines.push(`- 背景：${wp.background}`)
+    if (wp.targetAudience) lines.push(`- 目标人群：${wp.targetAudience}`)
+    if (wp.scenario) lines.push(`- 使用场景：${wp.scenario}`)
+    lines.push('')
+    return lines.join('\n') + prompt
   }
 
   private match(original: string, meta?: IntentMeta):

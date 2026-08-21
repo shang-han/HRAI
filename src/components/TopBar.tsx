@@ -183,13 +183,14 @@ const TopBar: React.FC = () => {
 
   return (
     <>
-      <div className="h-14 flex items-center justify-between px-4 bg-surface">
+      <div className="h-12 flex items-center justify-between px-4 bg-surface">
         <div className="flex gap-3 items-center">
           <button onClick={toggleSidebar} className="md:hidden p-1">
             {layout.sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
           </button>
           <span className="text-sm text-inkSecondary">
-            当前会话：<strong>{activeSession?.name || '无'}</strong>
+            当前会话：
+            <strong className="text-ink">{activeSession?.name || '无'}</strong>
           </span>
         </div>
         <div className="flex gap-2 items-center">
@@ -245,10 +246,6 @@ const TopBar: React.FC = () => {
       {/* 系统设置抽屉 */}
       <Drawer title="系统设置" open={settingsOpen} onClose={() => setSettingsOpen(false)} width={500}>
         <div className="space-y-4">
-          <div>
-            <h3 className="font-medium mb-2">主题</h3>
-            <Switch checked={theme === 'dark'} onChange={() => handleThemeToggle()} checkedChildren="深色" unCheckedChildren="浅色" />
-          </div>
           <div>
             <h3 className="font-medium mb-2">日志级别</h3>
             <Select defaultValue="info" style={{ width: 200 }} onChange={(v) => window.electronAPI.log.setLevel(v)}>

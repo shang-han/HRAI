@@ -275,6 +275,23 @@ function registerIpcHandlers() {
     return storageManager.saveMessage(sessionId, message)
   })
 
+  // 近期重点工作：保存 / 从历史恢复
+  ipcMain.handle('session:setWorkPriority', async (_event, sessionId: string, data: any) => {
+    return storageManager.setWorkPriority(sessionId, data)
+  })
+
+  ipcMain.handle('session:restoreWorkPriority', async (_event, sessionId: string, historyIndex: number) => {
+    return storageManager.restoreWorkPriority(sessionId, historyIndex)
+  })
+
+  ipcMain.handle('session:clearWorkPriority', async (_event, sessionId: string) => {
+    return storageManager.clearWorkPriority(sessionId)
+  })
+
+  ipcMain.handle('session:deleteWorkPriorityHistory', async (_event, sessionId: string, historyIndex: number) => {
+    return storageManager.deleteWorkPriorityHistory(sessionId, historyIndex)
+  })
+
   // ============ 聊天模块（仅走 Hermes 智能体，不降级直连） ============
   ipcMain.handle('chat:stream', async (_event, message: string, sessionId: string, _modelOverride?: string, intentMeta?: IntentMeta) => {
     const channel = `chat:stream:${sessionId}:${Date.now()}`

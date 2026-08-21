@@ -9,15 +9,20 @@ import TitleBar from './components/TitleBar'
 import ActivationPage from './components/ActivationPage'
 import CompanyOnboardingPage from './components/CompanyOnboardingPage'
 import OfflineBar from './components/OfflineBar'
+import WorkPriorityView from './components/WorkPriorityView'
+import TemplateManagerView from './components/TemplateManagerView'
 
 const App: React.FC = () => {
   const [activated, setActivated] = useState<boolean | null>(null)
   const [onboarding, setOnboarding] = useState<boolean | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
+  // 右侧主区域视图：chat=聊天 / work=近期重点工作页 / templates=预设指令库管理页
+  const [mainView, setMainView] = useState<'chat' | 'work' | 'templates'>('chat')
   const themeMode = useConfigStore(state => state.theme)
   const initSession = useSessionStore(state => state.initSession)
   const loadConfig = useConfigStore(state => state.loadConfig)
   const stopGenerating = useSessionStore(state => state.stopGenerating)
+  const activeSessionId = useSessionStore(state => state.activeSessionId)
 
   useEffect(() => {
     // 加载配置（模型、主题、快捷键等）
@@ -57,6 +62,18 @@ const App: React.FC = () => {
       document.documentElement.classList.remove('dark')
     }
   }, [themeMode])
+
+  // 切换会话时回到聊天视图（重点工作页只针对当前会话）
+  useEffect(() => {
+    setMainView('chat')
+  }, [activeSessionId])
+
+  // 输入框"模板库"按钮等入口：通过事件打开预设指令库管理页
+  useEffect(() => {
+    const openTemplates = () => setMainView('templates')
+    window.addEventListener('openTemplates', openTemplates)
+    return () => window.removeEventListener('openTemplates', openTemplates)
+  }, [])
 
   const enterMainApp = async () => {
     setOnboarding(false)
@@ -134,18 +151,29 @@ const App: React.FC = () => {
 
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧侧边栏 */}
-        <Sidebar />
+        <Sidebar
+          onOpenWork={() => setMainView('work')}
+          onOpenTemplates={() => setMainView('templates')}
+        />
 
         {/* 右侧主区域 */}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
-          {/* 顶部栏 */}
-          <TopBar />
+          {mainView === 'work' ? (
+            <WorkPriorityView onBack={() => setMainView('chat')} />
+          ) : mainView === 'templates' ? (
+            <TemplateManagerView onBack={() => setMainView('chat')} />
+          ) : (
+            <>
+              {/* 顶部栏 */}
+              <TopBar />
 
-          {/* 聊天区域 */}
-          <ChatArea />
+              {/* 聊天区域 */}
+              <ChatArea />
 
-          {/* 输入区域 */}
-          <InputArea />
+              {/* 输入区域 */}
+              <InputArea />
+            </>
+          )}
         </main>
       </div>
     </div>

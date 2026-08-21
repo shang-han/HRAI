@@ -8,6 +8,17 @@
    text-ink / text-primary 等），不要直接写色值。
    ============================================================ */
 
+/* ---------- 字体 ---------- */
+/* Noto Sans SC 思源黑体（随应用打包，变量字体覆盖全部字重），
+   许可证见项目根目录 LICENSE-OFL-NotoSansSC.txt */
+@font-face {
+  font-family: 'Noto Sans SC';
+  src: url('../assets/fonts/NotoSansSC-VF.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---------- 颜色变量 · 浅色模式 ---------- */
 :root {
   /* 品牌主色与语义色 */

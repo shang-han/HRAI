@@ -100,10 +100,15 @@ const ChatArea: React.FC = () => {
       {messages.map((message) => (
         <div
           key={message.id}
-          className={`flex message-enter ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          className={`flex message-enter items-start gap-2 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
+          {message.role !== 'user' && (
+            <div className="w-6 h-6 rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0 mt-1 select-none">
+              AI
+            </div>
+          )}
           <div
-            className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+            className={`max-w-[70%] rounded-xl px-4 py-3 ${
               message.role === 'user'
                 ? 'bg-primary text-white'
                 : 'bg-surface text-ink'
@@ -159,8 +164,11 @@ const ChatArea: React.FC = () => {
 
       {/* 加载中指示器 */}
       {isLoading && messages[messages.length - 1]?.role === 'user' && (
-        <div className="flex justify-start message-enter">
-          <div className="bg-surface rounded-2xl px-4 py-3">
+        <div className="flex justify-start items-start gap-2 message-enter">
+          <div className="w-6 h-6 rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0 mt-1 select-none">
+            AI
+          </div>
+          <div className="bg-surface rounded-xl px-4 py-3">
             <div className="flex gap-1">
               <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
               <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />

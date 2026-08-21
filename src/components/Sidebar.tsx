@@ -18,7 +18,7 @@ import {
   CaretRightOutlined
 } from '@ant-design/icons'
 
-const Sidebar: React.FC = () => {
+const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }> = ({ onOpenWork, onOpenTemplates }) => {
   const { sessions, activeSessionId, createSession, deleteSession, switchSession, renameSession } = useSessionStore()
   const { layout, toggleSidebar } = useConfigStore()
   const [searchText, setSearchText] = useState('')
@@ -28,15 +28,15 @@ const Sidebar: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState({
     sessions: true,
     workPriority: true,
-    businessNav: true,
-    presets: true,
-    templates: true
+    businessNav: false,
+    presets: false,
+    templates: false
   })
   // 业务导航树：一级（中心）与二级（模块）的展开状态，默认只展开第一个中心
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({})
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({})
-
   const collapsed = layout.sidebarCollapsed
+  const activeSession = sessions.find(s => s.id === activeSessionId)
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key as keyof typeof prev] }))
@@ -123,7 +123,7 @@ const Sidebar: React.FC = () => {
       </div>
 
       {/* 内容区 */}
-      <div className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-3">
+      <div className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-2">
         {/* 会话列表 */}
         <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
           <div onClick={() => toggleSection('sessions')} className="p-3 bg-primarySoft flex justify-between items-center cursor-pointer">
@@ -203,16 +203,24 @@ const Sidebar: React.FC = () => {
           </div>
           <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.workPriority ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
             <div className="overflow-hidden min-h-0">
-            <div className="p-2">
-              <Input.TextArea
-                placeholder="填写当前项目背景、目标人群、使用场景，辅助AI精准输出"
-                rows={3}
-                className="text-sm"
-              />
-              <div className="flex justify-end mt-2 gap-2">
-                <Button size="small" type="link">自动生成标题</Button>
-                <Button size="small" type="text">历史折叠</Button>
-              </div>
+            <div
+              className="p-2 cursor-pointer hover:bg-canvas transition-colors"
+              onClick={onOpenWork}
+              title="点击进入重点工作编辑页"
+            >
+              {activeSession?.workPriority ? (
+                <div>
+                  <div className="text-sm font-medium truncate">{activeSession.workPriority.title || '未命名重点工作'}</div>
+                  <div className="text-xs text-inkMuted truncate mt-0.5">
+                    {activeSession.workPriority.background || '（无背景描述）'}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-3">
+                  <div className="text-xs text-inkMuted">未设置重点工作，AI 输出将使用通用背景</div>
+                  <div className="text-xs text-primary mt-1">点击设置 →</div>
+                </div>
+              )}
             </div>
             </div>
           </div>
@@ -260,10 +268,21 @@ const Sidebar: React.FC = () => {
                                     <div
                                       key={ii}
                                       className="text-sm py-1 pl-8 pr-2 rounded-md hover:bg-primarySoft cursor-pointer transition-all text-inkMuted hover:text-primary"
-                                      onClick={() => {
-                                        // 填充对应的 Prompt 到输入框（视觉不变），同时携带业务意图标签给主进程路由
+                                      onClick={async () => {
+                                        // 导航条目与预设指令库模板一一对应：
+                                        // 有同名模板时填入模板完整内容，否则回退为简短指令
+                                        let text = `请生成：${item}`
+                                        try {
+                                          const tpls: any[] = await window.electronAPI.template.list()
+                                          const tpl = tpls.find((t: any) =>
+                                            t.name === item ||
+                                            item.startsWith(t.name) ||
+                                            t.name.startsWith(item)
+                                          )
+                                          if (tpl?.content) text = tpl.content
+                                        } catch { /* 模板加载失败时用简短指令 */ }
                                         const event = new CustomEvent('fillPrompt', {
-                                          detail: { text: `请生成：${item}`, intent: { hint: item } }
+                                          detail: { text, intent: { hint: item } }
                                         })
                                         window.dispatchEvent(event)
                                       }}
@@ -286,18 +305,14 @@ const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* 公共预设指令库 */}
-        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
-          <div onClick={() => toggleSection('presets')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
+        {/* 公共预设指令库：点击整行直接右侧打开（无展开收起） */}
+        <div
+          className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle cursor-pointer hover:bg-primarySoft transition-colors"
+          onClick={onOpenTemplates}
+          title="在右侧打开预设指令库管理页"
+        >
+          <div className="p-3 bg-primarySoft flex justify-between items-center">
             <span><StarOutlined /> 公共预设指令库</span>
-            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.presets ? 'rotate-90' : 'rotate-0'}`} /></span>
-          </div>
-          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.presets ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-            <div className="overflow-hidden min-h-0">
-            <div className="p-2 text-sm text-inkMuted text-center py-4">
-              点击业务导航中的功能即可加载预设指令
-            </div>
-            </div>
           </div>
         </div>
       </div>

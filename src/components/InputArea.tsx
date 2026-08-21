@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import { Button, Tooltip, Modal } from 'antd'
+import { useConfigStore } from '../store/configStore'
+import { Button, Tooltip, Modal, Dropdown } from 'antd'
+import type { MenuProps } from 'antd'
 import {
   SendOutlined,
   PaperClipOutlined,
@@ -9,7 +11,9 @@ import {
   AppstoreOutlined,
   ExportOutlined,
   StopOutlined,
-  CloseOutlined
+  CloseOutlined,
+  DownOutlined,
+  CheckOutlined
 } from '@ant-design/icons'
 
 const FALLBACK_COMMANDS = [
@@ -39,8 +43,49 @@ const InputArea: React.FC = () => {
   const [commands, setCommands] = useState<any[]>(FALLBACK_COMMANDS)
   const [commandIndex, setCommandIndex] = useState(0)
   const { sendMessage, isLoading, pendingMessages } = useSessionStore()
+  const { modelConfig, setModelConfig } = useConfigStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 输入框内模型选择（二级菜单）：一级选模态，二级选已配置模型，选中即设为该模态默认
+  const MODALITY_LABELS: Record<string, string> = {
+    dialogue: '对话',
+    image: '图片',
+    video: '视频',
+    multimodal: '多模态'
+  }
+  const [currentModel, setCurrentModel] = useState<{ type: string; name: string } | null>(() => {
+    const primary =
+      modelConfig.dialogue.find((m: any) => m.enabled && m.isPrimary) ||
+      modelConfig.dialogue.find((m: any) => m.enabled)
+    return primary ? { type: 'dialogue', name: primary.name || primary.modelName } : null
+  })
+
+  const handleModelChange = (type: string, id: string, name: string) => {
+    const updated = (modelConfig as any)[type].map((m: any) => ({ ...m, isPrimary: m.id === id }))
+    setModelConfig(type, updated)
+    setCurrentModel({ type, name })
+  }
+
+  const modelMenuItems: MenuProps['items'] = (['dialogue', 'image', 'video', 'multimodal'] as const).map(type => {
+    const enabled = (modelConfig as any)[type].filter((m: any) => m.enabled)
+    return {
+      key: type,
+      label: MODALITY_LABELS[type],
+      children: enabled.length > 0
+        ? enabled.map((m: any) => ({
+            key: m.id,
+            label: (
+              <span className="flex items-center justify-between gap-6">
+                <span>{m.name || m.modelName}</span>
+                {m.isPrimary && <CheckOutlined className="text-primary text-xs" />}
+              </span>
+            ),
+            onClick: () => handleModelChange(type, m.id, m.name || m.modelName)
+          }))
+        : [{ key: `${type}-empty`, label: '暂无已启用模型', disabled: true }]
+    }
+  })
 
 
 
@@ -312,25 +357,6 @@ const InputArea: React.FC = () => {
         </div>
       )}
 
-      {/* 工具栏 */}
-      <div className="flex gap-2 mb-2">
-        <Tooltip title="上传文件/图片">
-          <Button size="small" icon={<PaperClipOutlined />} onClick={() => fileInputRef.current?.click()}>
-            上传
-          </Button>
-        </Tooltip>
-        <Tooltip title="导出文档">
-          <Button size="small" icon={<ExportOutlined />} onClick={handleExport}>
-            导出
-          </Button>
-        </Tooltip>
-        <Tooltip title="模板库">
-          <Button size="small" icon={<AppstoreOutlined />}>
-            模板
-          </Button>
-        </Tooltip>
-      </div>
-
       {/* 隐藏的文件输入 */}
       <input
         ref={fileInputRef}
@@ -399,24 +425,66 @@ const InputArea: React.FC = () => {
           className="w-full bg-transparent p-3 pb-1 border-none text-ink resize-none overflow-y-auto outline-none placeholder:text-inkMuted"
           style={{ height: inputHeight }}
         />
-        <div className="flex justify-end items-center gap-2 px-2.5 pb-2.5 pt-1">
-          {isLoading && (
+        <div className="flex justify-between items-center gap-2 px-2.5 pb-2.5 pt-1">
+          {/* 左侧：上传/导出/模板小图标（原工具栏收进输入框内） */}
+          <div className="flex items-center gap-1">
+            <Tooltip title="上传文件/图片">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1.5 rounded-md text-inkMuted hover:text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas transition-colors"
+              >
+                <PaperClipOutlined className="text-sm" />
+              </button>
+            </Tooltip>
+            <Tooltip title="导出文档">
+              <button
+                onClick={handleExport}
+                className="p-1.5 rounded-md text-inkMuted hover:text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas transition-colors"
+              >
+                <ExportOutlined className="text-sm" />
+              </button>
+            </Tooltip>
+            <Tooltip title="预设指令库">
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('openTemplates'))}
+                className="p-1.5 rounded-md text-inkMuted hover:text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas transition-colors"
+              >
+                <AppstoreOutlined className="text-sm" />
+              </button>
+            </Tooltip>
+          </div>
+          {/* 右侧：模型二级菜单 + 停止/发送 */}
+          <div className="flex items-center gap-2">
+            <Dropdown
+              trigger={['hover']}
+              menu={{ items: modelMenuItems, triggerSubMenuAction: 'hover' }}
+            >
+              <button
+                title="选择模型"
+                className="flex items-center gap-1 text-xs text-inkSecondary hover:text-primary transition-colors max-w-[160px] px-1 py-1 rounded-md"
+              >
+                <span className="truncate">{currentModel ? currentModel.name : '选择模型'}</span>
+                <DownOutlined className="text-[10px] shrink-0" />
+              </button>
+            </Dropdown>
             <Button
               type="primary"
-              danger
               shape="circle"
-              icon={<StopOutlined />}
-              onClick={handleStop}
-              title="停止"
+              icon={<SendOutlined />}
+              onClick={handleSend}
+              title="发送"
             />
-          )}
-          <Button
-            type="primary"
-            shape="circle"
-            icon={<SendOutlined />}
-            onClick={handleSend}
-            title="发送"
-          />
+            {isLoading && (
+              <Button
+                type="primary"
+                danger
+                shape="circle"
+                icon={<StopOutlined />}
+                onClick={handleStop}
+                title="停止"
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -432,6 +500,7 @@ const InputArea: React.FC = () => {
         <p>检测到您可能需要生成 PPT / Excel / 视频等富格式文件。</p>
         <p className="text-inkMuted mt-2 text-sm">建议在指令中明确要求 AI 使用结构化格式输出，以降低排版异常概率。</p>
       </Modal>
+
     </div>
   )
 }
