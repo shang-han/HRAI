@@ -101,8 +101,11 @@ export class GiteeUpdater {
     }
 
     const release: any = await resp.json()
-    const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '')
-    const currentVersion = app.getVersion()
+    // 兼容部分环境返回的 release 没有 tag_name 或名称不是纯版本号的情况
+    const rawVersion = String(release.tag_name || release.name || '')
+    const versionMatch = rawVersion.match(/v?(\d+\.\d+\.\d+)/)
+    const latestVersion = versionMatch ? versionMatch[1] : rawVersion.replace(/^v/i, '').trim()
+    const currentVersion = app.getVersion().trim()
     const assets: any[] = Array.isArray(release.assets) ? release.assets : []
     const exactExe = assets.find((a: any) => /\.exe$/i.test(a.name || ''))
     const firstPart = assets.find((a: any) => /\.exe\.part\d+$/i.test(a.name || ''))
