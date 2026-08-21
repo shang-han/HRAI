@@ -202,6 +202,11 @@ export class ModelRouter {
     return providers.find(p => p.enabled) || providers[0] || null
   }
 
+  getMultimodalModel(): ModelProvider | null {
+    const providers = this.storageManager.getConfig()?.modelConfig?.multimodal || []
+    return providers.find(p => p.enabled) || providers[0] || null
+  }
+
   /**
    * 检测任务类型
    */
@@ -270,7 +275,8 @@ export class ModelRouter {
     onChunk: (chunk: string) => void,
     onError: (error: string) => void,
     onDone: () => void,
-    abortKey?: string
+    abortKey?: string,
+    images?: string[]
   ): Promise<void> {
     if (!model) {
       onError('没有可用的模型，请先在右上角"模型"中配置并启用一个对话模型')
@@ -292,7 +298,15 @@ export class ModelRouter {
         })
       }
 
-      messages.push({ role: 'user', content: message })
+      if (images && images.length > 0 && model.type === 'multimodal') {
+        const content: any[] = [{ type: 'text', text: message }]
+        for (const img of images) {
+          content.push({ type: 'image_url', image_url: { url: img } })
+        }
+        messages.push({ role: 'user', content })
+      } else {
+        messages.push({ role: 'user', content: message })
+      }
 
       await this.callOpenAICompatibleStream(model, messages, onChunk, onError, onDone, abortKey)
     } catch (err: any) {

@@ -268,9 +268,31 @@ function registerIpcHandlers() {
   })
 
   // ============ 聊天模块（仅走 Hermes 智能体，不降级直连） ============
-  ipcMain.handle('chat:stream', async (_event, message: string, sessionId: string, _modelOverride?: string, intentMeta?: IntentMeta) => {
+  ipcMain.handle('chat:stream', async (_event, message: string, sessionId: string, _modelOverride?: string, images?: string[], intentMeta?: IntentMeta) => {
     const channel = `chat:stream:${sessionId}:${Date.now()}`
     const send = (payload: any) => mainWindow?.webContents.send(channel, payload)
+
+    // 带图片时直接走多模态模型，不经过 Hermes 文本 ACP（Hermes 目前不读图）
+    if (images && images.length > 0) {
+      const multimodalModel = modelRouter.getMultimodalModel()
+      if (!multimodalModel) {
+        send({ type: 'error', data: '未启用多模态模型，请先在右上角“模型 → 多模态模型”中配置并启用' })
+        return { channel }
+      }
+      modelRouter.callModelStream(
+        multimodalModel,
+        message,
+        storageManager.getConfig(),
+        (text: string) => send({ type: 'chunk', data: text }),
+        (error: string) => send({ type: 'error', data: error }),
+        () => send({ type: 'done' }),
+        channel,
+        images
+      ).catch((err: any) => {
+        send({ type: 'error', data: err.message || '多模态模型调用失败' })
+      })
+      return { channel }
+    }
 
     // P0 隐形内核：路由业务意图，装配 skill/工作流/输出契约，原文照存照显
     const prepared = intentRouter.prepare(message, intentMeta, sessionId)
@@ -310,7 +332,19 @@ function registerIpcHandlers() {
   })
 
   // 非流式发送
-  ipcMain.handle('chat:send', async (_event, message: string, sessionId: string, _modelOverride?: string, intentMeta?: IntentMeta) => {
+  ipcMain.handle('chat:send', async (_event, message: string, sessionId: string, _modelOverride?: string, images?: string[], intentMeta?: IntentMeta) => {
+    // 带图片时直接走多模态模型，不经过 Hermes 文本 ACP
+    if (images && images.length > 0) {
+      const multimodalModel = modelRouter.getMultimodalModel()
+      if (!multimodalModel) {
+        return { success: false, error: '未启用多模态模型，请先在右上角“模型 → 多模态模型”中配置并启用' }
+      }
+      const result = await modelRouter.callModel(multimodalModel, message, storageManager.getConfig(), images)
+      return result.success
+        ? { success: true, content: result.content }
+        : { success: false, error: result.error }
+    }
+
     const prepared = intentRouter.prepare(message, intentMeta, sessionId)
 
     // 渠道会话双向桥接（非流式备用路径）
@@ -348,6 +382,7 @@ function registerIpcHandlers() {
 
   // 停止生成
   ipcMain.handle('chat:stop', async () => {
+    modelRouter.abortAll()
     hermesManager.stopGeneration().catch(() => {})
     return true
   })

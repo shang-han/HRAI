@@ -105,7 +105,7 @@ async function runTurn(
 
   try {
     // 调用模型（流式）：intent 在主进程被路由并装配为 skill/工作流指令
-    const result = await window.electronAPI.chat.stream(content, sessionId, undefined, intent)
+    const result = await window.electronAPI.chat.stream(content, sessionId, undefined, images, intent)
 
     watchdog = setTimeout(() => {
       const s = get()
@@ -178,7 +178,7 @@ async function runTurn(
     })
   } catch (err: any) {
     // 非流式回退
-    const result = await window.electronAPI.chat.send(content, sessionId, undefined, intent)
+    const result = await window.electronAPI.chat.send(content, sessionId, undefined, images, intent)
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
       role: 'assistant',
