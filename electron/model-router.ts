@@ -36,6 +36,16 @@ export class ModelRouter {
   }
 
   /**
+   * 将用户填写的 OpenAI 兼容地址规范化为完整的 /chat/completions 端点。
+   * 兼容类似 https://dashscope.aliyuncs.com/compatible-mode/v1 的 base 地址。
+   */
+  private normalizeChatEndpoint(endpoint: string): string {
+    const trimmed = endpoint.trim().replace(/\/+$/, '')
+    if (/\/chat\/completions$/i.test(trimmed)) return trimmed
+    return `${trimmed}/chat/completions`
+  }
+
+  /**
    * 获取当前对话模型：优先 isPrimary，其次第一个启用的
    */
   getDefaultDialogueModel(config: any): ModelProvider | null {
@@ -75,7 +85,8 @@ export class ModelRouter {
     if (!model?.apiEndpoint) return { success: false, message: '请先填写 API 端点' }
     if (!model?.apiKey?.trim()) return { success: false, message: '请先填写 API Key' }
 
-    const base = model.apiEndpoint.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '')
+    const normalized = this.normalizeChatEndpoint(model.apiEndpoint)
+    const base = normalized.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '')
     const url = `${base}/models`
 
     try {
@@ -293,7 +304,7 @@ export class ModelRouter {
    * OpenAI 兼容接口调用（非流式）
    */
   private async callOpenAICompatible(model: ModelProvider, messages: ChatMessage[]): Promise<string> {
-    const url = new URL(model.apiEndpoint)
+    const url = new URL(this.normalizeChatEndpoint(model.apiEndpoint))
     const body = JSON.stringify({
       model: model.modelName,
       messages,
@@ -411,7 +422,7 @@ export class ModelRouter {
     onDone: () => void,
     abortKey?: string
   ): Promise<void> {
-    const url = new URL(model.apiEndpoint)
+    const url = new URL(this.normalizeChatEndpoint(model.apiEndpoint))
     const body = JSON.stringify({
       model: model.modelName,
       messages,

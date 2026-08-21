@@ -17,10 +17,16 @@ if (!token) {
 
 const owner = process.env.GITEE_OWNER || 'dk-zy'
 const repo = process.env.GITEE_REPO || 'hrai'
-const cur = pkg.version.split('.').map(Number)
-const version = process.env.RELEASE_VERSION || `${cur[0]}.${cur[1]}.${(cur[2] || 0) + 1}`
+// 默认发布版本与 package.json 保持一致（即当前构建出的安装包版本），
+// 需要发布新版本时请先更新 package.json 的 version 再执行打包和本脚本；
+// 也可以使用 RELEASE_VERSION 环境变量覆盖。
+const version = (process.env.RELEASE_VERSION || pkg.version).trim().replace(/^v/i, '')
 const tag = `v${version}`
-const releaseFile = process.env.RELEASE_FILE || path.resolve(`release/Hermes人事行政智能专家 Setup ${version}.exe`)
+const platformExt = process.platform === 'darwin' ? '.dmg' : process.platform === 'linux' ? '.AppImage' : '.exe'
+const defaultReleaseFile = process.platform === 'win32'
+  ? `release/Hermes人事行政智能专家 Setup ${version}${platformExt}`
+  : `release/Hermes人事行政智能专家-${version}${platformExt}`
+const releaseFile = process.env.RELEASE_FILE || path.resolve(defaultReleaseFile)
 if (!fs.existsSync(releaseFile)) {
   console.error('未找到安装包:', releaseFile)
   process.exit(1)
