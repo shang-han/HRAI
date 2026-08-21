@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import { useConfigStore } from '../store/configStore'
 import { Button, Tooltip, Modal } from 'antd'
 import {
   SendOutlined,
@@ -9,8 +8,8 @@ import {
   FileTextOutlined,
   AppstoreOutlined,
   ExportOutlined,
-  SwapOutlined,
-  StopOutlined
+  StopOutlined,
+  CloseOutlined
 } from '@ant-design/icons'
 
 const FALLBACK_COMMANDS = [
@@ -30,16 +29,38 @@ const FALLBACK_COMMANDS = [
 const InputArea: React.FC = () => {
   const [inputText, setInputText] = useState('')
   const [images, setImages] = useState<string[]>([])
+  // 文本附件：大文本/JSON/CSV 以附件形式随消息发送（≤50KB 的小文件仍直接进输入框）
+  const [textAttachments, setTextAttachments] = useState<{ name: string; content: string }[]>([])
+  // 输入框高度：可拖动手柄上下拉伸（48px ~ 260px），默认单行高度
+  const [inputHeight, setInputHeight] = useState(48)
+  const [resizing, setResizing] = useState(false)
   const [intent, setIntent] = useState<{ hint?: string; id?: string } | null>(null)
   const [showRichFormatWarning, setShowRichFormatWarning] = useState(false)
   const [commands, setCommands] = useState<any[]>(FALLBACK_COMMANDS)
   const [commandIndex, setCommandIndex] = useState(0)
   const { sendMessage, isLoading, pendingMessages } = useSessionStore()
-  const { layout, setInputMode } = useConfigStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const isMultiLine = layout.inputMode === 'multi'
+
+
+  // 拖动调整输入框高度（向上拉撑高，向下压回缩）
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startHeight = inputHeight
+    setResizing(true)
+    const onMove = (ev: MouseEvent) => {
+      setInputHeight(Math.min(260, Math.max(48, startHeight + (startY - ev.clientY))))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setResizing(false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   // 斜杠命令补全
   const commandPrefix = inputText.startsWith('/') ? inputText.slice(1).toLowerCase() : ''
@@ -89,7 +110,7 @@ const InputArea: React.FC = () => {
 
   const handleSend = async () => {
     const text = inputText.trim()
-    if (!text && images.length === 0) return
+    if (!text && images.length === 0 && textAttachments.length === 0) return
 
     // 斜杠命令：立即通过独立通道发送，不占用流式回复，也不需要先停止生成
     if (text.startsWith('/')) {
@@ -109,6 +130,7 @@ const InputArea: React.FC = () => {
 
       setInputText('')
       setImages([])
+      setTextAttachments([])
       setIntent(null)
       setCommandIndex(0)
       return
@@ -123,10 +145,16 @@ const InputArea: React.FC = () => {
 
     setInputText('')
     setImages([])
+    // 文本附件组装进消息内容，让 AI 能感知文件名来源
+    const attachments = textAttachments
+    setTextAttachments([])
+    const fullText = [text, ...attachments.map(a => `📎 ${a.name}：\n${a.content}`)]
+      .filter(Boolean)
+      .join('\n\n')
     // 把导航携带的意图透传给主进程做 skill/工作流装配
     const currentIntent = intent
     setIntent(null)
-    await sendMessage(text, images.length > 0 ? images : undefined, currentIntent || undefined)
+    await sendMessage(fullText, images.length > 0 ? images : undefined, currentIntent || undefined)
   }
 
   const handleStop = async () => {
@@ -169,18 +197,10 @@ const InputArea: React.FC = () => {
       }
     }
 
-    if (isMultiLine) {
-      // 多行模式：Ctrl+Enter 发送
-      if (e.key === 'Enter' && e.ctrlKey) {
-        e.preventDefault()
-        handleSend()
-      }
-    } else {
-      // 单行模式：Enter 发送，Shift+Enter 换行
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        handleSend()
-      }
+    // 默认单行模式：Enter 发送，Shift+Enter 换行
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
     }
   }
 
@@ -203,11 +223,20 @@ const InputArea: React.FC = () => {
         }
         reader.readAsDataURL(file)
       }
-      // 文本文件
+      // 文本文件：小文件直接进输入框（顺手可编辑），大文件作为附件随消息发送
       else if (['.txt', '.md', '.csv', '.json'].some(ext => file.name.endsWith(ext))) {
+        if (file.size > 2 * 1024 * 1024) {
+          Modal.warning({ title: '文件过大', content: `${file.name} 超过 2MB，建议拆分后重试或转为其他格式` })
+          continue
+        }
         const reader = new FileReader()
         reader.onload = () => {
-          setInputText(prev => prev + (prev ? '\n' : '') + (reader.result as string))
+          const content = reader.result as string
+          if (file.size <= 50 * 1024) {
+            setInputText(prev => prev + (prev ? '\n' : '') + content)
+          } else {
+            setTextAttachments(prev => [...prev, { name: file.name, content }])
+          }
         }
         reader.readAsText(file)
       }
@@ -248,18 +277,35 @@ const InputArea: React.FC = () => {
   }
 
   return (
-    <div className="shrink-0 border-t border-line p-4 bg-surface">
-      {/* 图片预览 */}
-      {images.length > 0 && (
-        <div className="flex gap-2 mb-2 flex-wrap">
+    <div className="shrink-0 p-4 bg-surface">
+      {/* 附件预览：图片 + 文本附件 */}
+      {(images.length > 0 || textAttachments.length > 0) && (
+        <div className="flex gap-2 mb-2 flex-wrap items-center">
           {images.map((img, i) => (
-            <div key={i} className="relative group">
+            <div key={i} className="relative">
               <img src={img} alt="" className="w-16 h-16 object-cover rounded-lg border border-line" />
               <button
                 onClick={() => removeImage(i)}
-                className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs hidden group-hover:block"
+                title="移除图片"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-red-500 text-white rounded-full shadow hover:bg-red-600"
               >
-                ×
+                <CloseOutlined className="text-[10px]" />
+              </button>
+            </div>
+          ))}
+          {textAttachments.map((a, i) => (
+            <div
+              key={a.name + i}
+              className="flex items-center gap-1.5 bg-surfaceSubtle dark:bg-canvas border border-line rounded-lg pl-2 pr-1 py-1 text-xs text-inkSecondary max-w-[220px]"
+            >
+              <FileTextOutlined className="shrink-0" />
+              <span className="truncate">{a.name}</span>
+              <button
+                onClick={() => setTextAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                title="移除附件"
+                className="shrink-0 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600"
+              >
+                <CloseOutlined className="text-[10px]" />
               </button>
             </div>
           ))}
@@ -281,16 +327,6 @@ const InputArea: React.FC = () => {
         <Tooltip title="模板库">
           <Button size="small" icon={<AppstoreOutlined />}>
             模板
-          </Button>
-        </Tooltip>
-        <div className="flex-1" />
-        <Tooltip title={isMultiLine ? '切换为单行模式 (Enter发送)' : '切换为多行模式 (Ctrl+Enter发送)'}>
-          <Button
-            size="small"
-            icon={<SwapOutlined />}
-            onClick={() => setInputMode(isMultiLine ? 'single' : 'multi')}
-          >
-            {isMultiLine ? '多行' : '单行'}
           </Button>
         </Tooltip>
       </div>
@@ -335,13 +371,21 @@ const InputArea: React.FC = () => {
       {/* 连续发送队列提示 */}
       {pendingMessages.length > 0 && (
         <div className="mb-2 text-sm font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
           ⏳ 还有 {pendingMessages.length} 条消息排队中，当前回合结束后自动发送…
         </div>
       )}
 
-      {/* 输入框 */}
-      <div className="flex gap-2">
+      {/* 输入框高度拖动手柄：悬停/拖动时变主色 */}
+      <div
+        className={`group flex justify-center pt-1 cursor-ns-resize select-none ${resizing ? 'cursor-grabbing' : ''}`}
+        onMouseDown={startResize}
+        title="拖动调整输入框高度"
+      >
+        <div className={`w-10 h-1.5 rounded-full transition-colors ${resizing ? 'bg-primary' : 'bg-line dark:bg-lineDark group-hover:bg-primary'}`} />
+      </div>
+
+      {/* 输入框：外框容器内，上部分文字区，底部一行按钮（发送图标框内右下角） */}
+      <div className="border border-line rounded-lg bg-canvas focus-within:border-primary transition-colors">
         <textarea
           ref={textareaRef}
           value={inputText}
@@ -351,28 +395,29 @@ const InputArea: React.FC = () => {
           }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={isMultiLine ? '输入需求... (Ctrl+Enter 发送)' : '输入需求... (Enter 发送)'}
-          className="flex-1 border border-line rounded-lg p-3 bg-canvas text-ink resize-none focus:border-primary focus:outline-none transition-colors"
-          rows={isMultiLine ? 4 : 2}
+          placeholder={'输入需求... (Enter 发送，Shift+Enter 换行)'}
+          className="w-full bg-transparent p-3 pb-1 border-none text-ink resize-none overflow-y-auto outline-none placeholder:text-inkMuted"
+          style={{ height: inputHeight }}
         />
-        {isLoading && (
+        <div className="flex justify-end items-center gap-2 px-2.5 pb-2.5 pt-1">
+          {isLoading && (
+            <Button
+              type="primary"
+              danger
+              shape="circle"
+              icon={<StopOutlined />}
+              onClick={handleStop}
+              title="停止"
+            />
+          )}
           <Button
-            danger
-            icon={<StopOutlined />}
-            onClick={handleStop}
-            className="self-end h-10"
-          >
-            停止
-          </Button>
-        )}
-        <Button
-          type="primary"
-          icon={<SendOutlined />}
-          onClick={handleSend}
-          className="self-end h-10"
-        >
-          发送
-        </Button>
+            type="primary"
+            shape="circle"
+            icon={<SendOutlined />}
+            onClick={handleSend}
+            title="发送"
+          />
+        </div>
       </div>
 
       {/* 富格式提醒弹窗 */}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useConfigStore } from '../store/configStore'
-import { Modal, Input, Button, Tooltip } from 'antd'
+import { Modal, Input, Button } from 'antd'
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -100,16 +100,12 @@ const Sidebar: React.FC = () => {
   if (collapsed) {
     return (
       <aside className="w-12 bg-surface border-r border-line flex flex-col items-center py-3 gap-3 transition-all duration-300">
-        <Tooltip title="展开侧边栏">
-          <button onClick={toggleSidebar} className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-            <RightOutlined />
-          </button>
-        </Tooltip>
-        <Tooltip title="新建会话">
-          <button onClick={() => createSession()} className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-            <PlusOutlined />
-          </button>
-        </Tooltip>
+        <button onClick={toggleSidebar} title="展开侧边栏" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+          <RightOutlined />
+        </button>
+        <button onClick={() => createSession()} title="新建会话" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+          <PlusOutlined />
+        </button>
       </aside>
     )
   }
@@ -117,12 +113,11 @@ const Sidebar: React.FC = () => {
   return (
     <aside className="w-[340px] bg-surface border-r border-line flex-shrink-0 flex flex-col transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl">
       {/* 头部 */}
-      <div className="p-4 border-b border-line flex justify-between items-center">
+      <div className="p-4 flex justify-between items-center">
         <div>
           <h1 className="font-bold text-xl text-primary">Hermes HR智脑</h1>
-          <div className="text-xs text-inkMuted">人事行政一体化智能专家</div>
         </div>
-        <button onClick={toggleSidebar} className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas hidden md:block">
+        <button onClick={toggleSidebar} title="收起侧边栏" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas hidden md:block">
           <LeftOutlined />
         </button>
       </div>
@@ -152,7 +147,7 @@ const Sidebar: React.FC = () => {
               <Input
                 prefix={<SearchOutlined />}
                 placeholder="搜索会话..."
-                size="small"
+                size="middle"
                 value={searchText}
                 onChange={e => setSearchText(e.target.value)}
                 className="mb-2"

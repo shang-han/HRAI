@@ -34,13 +34,19 @@ interface DownloadState {
 }
 
 function compareVersions(a: string, b: string): number {
-  const pa = a.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0)
-  const pb = b.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0)
+  const na = a.replace(/^v/i, '').toLowerCase()
+  const nb = b.replace(/^v/i, '').toLowerCase()
+  const pa = na.split('.').map(n => parseInt(n, 10) || 0)
+  const pb = nb.split('.').map(n => parseInt(n, 10) || 0)
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const x = pa[i] || 0
     const y = pb[i] || 0
     if (x !== y) return x - y
   }
+  // 数值相同：预发布版本（含 -，如 1.0.1-beta）低于正式版
+  const aPre = na.includes('-')
+  const bPre = nb.includes('-')
+  if (aPre !== bPre) return aPre ? -1 : 1
   return 0
 }
 
@@ -147,8 +153,10 @@ export class GiteeUpdater {
     const sameSeries = curMajor === newMajor && curMinor === newMinor
     const useDelta = !!deltaUrl && sameSeries && (fullSize === 0 || deltaSize < fullSize * 0.75)
 
+    // 预发布版本不视为正式更新（避免已是最新时还弹更新框）
+    const isPrerelease = release.prerelease === true
     return {
-      hasUpdate: !!latestVersion && compareVersions(latestVersion, currentVersion) > 0,
+      hasUpdate: !isPrerelease && !!latestVersion && compareVersions(latestVersion, currentVersion) > 0,
       latestVersion,
       currentVersion,
       releaseNotes: String(release.body || release.notes || ''),
@@ -166,8 +174,11 @@ export class GiteeUpdater {
 
   async downloadLatest(): Promise<{ filePath: string; updateType: 'incremental' | 'full' }> {
     const info = await this.checkForUpdates()
-    if (!info.hasUpdate || !info.downloadUrl) {
-      throw new Error(info.latestVersion ? '当前已经是最新版本' : '没有可用的更新包')
+    if (!info.hasUpdate) {
+      throw new Error('当前已经是最新版本')
+    }
+    if (!info.downloadUrl) {
+      throw new Error('没有找到可用的更新包')
     }
 
     const incremental = info.updateType === 'incremental' && !!info.deltaUrl
