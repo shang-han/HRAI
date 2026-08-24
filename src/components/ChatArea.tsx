@@ -26,6 +26,20 @@ const ChatArea: React.FC = () => {
     isNearBottomRef.current = isNearBottom()
   }
 
+  // 容器高度变化（如输入框被拉伸/压缩）时：若原本贴底则保持贴底，
+  // 否则浏览器保持 scrollTop 不变，底部内容会滑出可视区
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      if (isNearBottomRef.current) {
+        scrollToBottom(false)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   // 新消息/流式内容更新时：仅在用户位于底部附近时跟随滚动
   useEffect(() => {
     if (isNearBottomRef.current) {

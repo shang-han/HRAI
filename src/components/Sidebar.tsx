@@ -154,6 +154,10 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
               />
               {sessions
                 .filter(s => s.name.toLowerCase().includes(searchText.toLowerCase()))
+                .length > 0 && (
+                <div className="space-y-1 max-h-[200px] overflow-y-auto pr-0.5">
+                {sessions
+                .filter(s => s.name.toLowerCase().includes(searchText.toLowerCase()))
                 .map(session => (
                   <div
                     key={session.id}
@@ -190,6 +194,8 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
                     </div>
                   </div>
                 ))}
+                </div>
+              )}
             </div>
             </div>
           </div>

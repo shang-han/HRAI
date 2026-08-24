@@ -36,6 +36,21 @@ const hermesSessions = new Map<string, string>()
 // ACP 审批请求 -> Promise resolve
 const pendingApprovals = new Map<number, (allow: boolean) => void>()
 
+/** 是否已有"启用且填写了 API Key"的对话模型（聊天可用性的前置条件） */
+function hasUsableDialogueModel(): boolean {
+  const list = storageManager?.getConfig()?.modelConfig?.dialogue || []
+  return list.some((p: any) => p.enabled && p.apiKey && p.apiKey.trim())
+}
+
+/** 把底层模型错误翻译成人话（避免裸 401 透传给用户） */
+function friendlyModelError(error: string): string {
+  const e = String(error || '').toLowerCase()
+  if (e.includes('401') || e.includes('authentication')) {
+    return '模型认证失败（401）：请打开"模型接入配置"，启用对话模型并填写正确的 API Key'
+  }
+  return error
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -329,6 +344,47 @@ function registerIpcHandlers() {
 
     intentRouter.recordStart(prepared)
 
+    // 图片/视频生成任务自动路由：按任务类型走"第一个已启用"的对应模型（不走 Hermes）
+    const taskType = modelRouter.detectTaskType(message)
+    if (taskType === 'image' || taskType === 'video') {
+      const taskModel = modelRouter.getFirstEnabled(taskType)
+      if (!taskModel) {
+        const label = taskType === 'image' ? '图片' : '视频'
+        const error = `未启用${label}模型，请先在"模型接入配置"中启用并配置对应模型`
+        intentRouter.recordEnd(prepared.taskId, 'error', error)
+        send({ type: 'error', data: error })
+        return { channel }
+      }
+      modelRouter.callModelStream(
+        taskModel,
+        message,
+        storageManager.getConfig(),
+        (text: string) => send({ type: 'chunk', data: text }),
+        (error: string) => {
+          intentRouter.recordEnd(prepared.taskId, 'error', error)
+          send({ type: 'error', data: error })
+        },
+        () => {
+          intentRouter.recordEnd(prepared.taskId, 'done')
+          send({ type: 'done' })
+        },
+        channel
+      ).catch((err: any) => {
+        intentRouter.recordEnd(prepared.taskId, 'error', err.message)
+        send({ type: 'error', data: err.message })
+      })
+      return { channel }
+    }
+
+    // 发送前检查：没有任何"启用且填了 Key"的对话模型时直接明确提示，
+    // 避免 Hermes 用空配置调用模型后透传裸 401
+    if (!hasUsableDialogueModel()) {
+      const error = '未启用对话模型：请打开"模型接入配置"，启用对话模型并填写 API Key'
+      intentRouter.recordEnd(prepared.taskId, 'error', error)
+      send({ type: 'error', data: error })
+      return { channel }
+    }
+
     const hermesSessionId = await ensureHermesSession(sessionId)
     if (!hermesSessionId) {
       const error = 'Hermes 智能体未运行，请检查日志后重试（模型配置 → 日志）'
@@ -346,11 +402,11 @@ function registerIpcHandlers() {
       },
       onError: (error: string) => {
         intentRouter.recordEnd(prepared.taskId, 'error', error)
-        send({ type: 'error', data: error })
+        send({ type: 'error', data: friendlyModelError(error) })
       }
     }).catch((err: any) => {
       intentRouter.recordEnd(prepared.taskId, 'error', err.message)
-      send({ type: 'error', data: err.message })
+      send({ type: 'error', data: friendlyModelError(err.message) })
     })
 
     return { channel }
@@ -378,6 +434,30 @@ function registerIpcHandlers() {
 
     intentRouter.recordStart(prepared)
 
+    // 图片/视频生成任务自动路由（与流式一致）
+    const taskType = modelRouter.detectTaskType(message)
+    if (taskType === 'image' || taskType === 'video') {
+      const taskModel = modelRouter.getFirstEnabled(taskType)
+      if (!taskModel) {
+        const label = taskType === 'image' ? '图片' : '视频'
+        const error = `未启用${label}模型，请先在"模型接入配置"中启用并配置对应模型`
+        intentRouter.recordEnd(prepared.taskId, 'error', error)
+        return { success: false, error }
+      }
+      const result = await modelRouter.callModel(taskModel, message, storageManager.getConfig())
+      intentRouter.recordEnd(prepared.taskId, result.success ? 'done' : 'error', result.error)
+      return result.success
+        ? { success: true, content: result.content }
+        : { success: false, error: result.error }
+    }
+
+    // 发送前检查（与流式一致）：没有可用对话模型时明确提示
+    if (!hasUsableDialogueModel()) {
+      const error = '未启用对话模型：请打开"模型接入配置"，启用对话模型并填写 API Key'
+      intentRouter.recordEnd(prepared.taskId, 'error', error)
+      return { success: false, error }
+    }
+
     const hermesSessionId = await ensureHermesSession(sessionId)
     if (!hermesSessionId) {
       const error = 'Hermes 智能体未运行，请检查日志后重试（模型配置 → 日志）'
@@ -396,11 +476,11 @@ function registerIpcHandlers() {
         },
         onError: (error: string) => {
           intentRouter.recordEnd(prepared.taskId, 'error', error)
-          resolve({ success: false, error })
+          resolve({ success: false, error: friendlyModelError(error) })
         }
       }).catch((err: any) => {
         intentRouter.recordEnd(prepared.taskId, 'error', err.message)
-        resolve({ success: false, error: err.message })
+        resolve({ success: false, error: friendlyModelError(err.message) })
       })
     })
   })

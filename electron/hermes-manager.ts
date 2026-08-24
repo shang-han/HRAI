@@ -260,6 +260,18 @@ export class HermesManager {
         }
       })
 
+      // 等待 spawn 结果：python.exe 缺失/不可执行时这里会立刻结束，
+      // 直接抛错，不再误报"启动成功"
+      await new Promise<void>((resolve) => {
+        const proc = this.process!
+        const done = () => resolve()
+        proc.once('spawn', done)
+        proc.once('error', done)
+      })
+      if (!this.process?.pid) {
+        throw new Error(`Hermes Python 进程启动失败：${this.pythonPath} 不存在或不可执行`)
+      }
+
       // 初始化 ACP 协议（失败不影响进程运行）
       try {
         await this.acpInitialize()

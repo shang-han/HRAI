@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Button, Input, Modal, Popconfirm } from 'antd'
+import { requestFillInput } from '../utils/fillInput'
 import {
   ArrowLeftOutlined,
   PlusOutlined,
@@ -114,7 +115,7 @@ const TemplateManagerView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       <div className="flex-1 min-h-0 overflow-auto">
         <div className="max-w-2xl mx-auto p-6 space-y-3">
           <div className="text-sm text-inkMuted">
-            业务导航条目按名称与模板一一对应：点击导航条目时，将把对应模板的指令内容填入输入框。修改模板内容即可调整对应条目的快捷指令。
+            点击模板条目可把指令内容填入输入框；悬停条目可用 ✏️ 编辑、🗑 删除。业务导航条目按名称与模板一一对应，修改模板内容即可调整对应条目的快捷指令。
           </div>
 
           <Input
@@ -133,7 +134,11 @@ const TemplateManagerView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               {filtered.map(t => (
                 <div
                   key={t.id}
-                  onClick={() => openEdit(t)}
+                  onClick={() => {
+                    // 点击条目：把指令内容填入消息输入框并返回聊天
+                    requestFillInput(t.content)
+                    onBack()
+                  }}
                   className="group flex items-center gap-2 px-3 py-2 border border-line rounded-md bg-surfaceSubtle dark:bg-canvas cursor-pointer hover:border-primary transition-colors"
                 >
                   <FileTextOutlined className="text-sm text-inkMuted shrink-0" />

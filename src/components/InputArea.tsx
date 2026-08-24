@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useConfigStore } from '../store/configStore'
 import { Button, Tooltip, Modal, Dropdown } from 'antd'
+import { consumePendingFill } from '../utils/fillInput'
 import type { MenuProps } from 'antd'
 import {
   SendOutlined,
@@ -42,7 +43,7 @@ const InputArea: React.FC = () => {
   const [showRichFormatWarning, setShowRichFormatWarning] = useState(false)
   const [commands, setCommands] = useState<any[]>(FALLBACK_COMMANDS)
   const [commandIndex, setCommandIndex] = useState(0)
-  const { sendMessage, isLoading, pendingMessages } = useSessionStore()
+  const { sendMessage, isLoading, pendingMessages, activeSessionId } = useSessionStore()
   const { modelConfig, setModelConfig } = useConfigStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -54,17 +55,23 @@ const InputArea: React.FC = () => {
     video: '视频',
     multimodal: '多模态'
   }
-  const [currentModel, setCurrentModel] = useState<{ type: string; name: string } | null>(() => {
+  const [currentModel, setCurrentModel] = useState<{ type: string; name: string; modelName: string } | null>(() => {
     const primary =
       modelConfig.dialogue.find((m: any) => m.enabled && m.isPrimary) ||
       modelConfig.dialogue.find((m: any) => m.enabled)
-    return primary ? { type: 'dialogue', name: primary.name || primary.modelName } : null
+    return primary
+      ? {
+          type: 'dialogue',
+          name: primary.name || primary.modelName,
+          modelName: primary.modelName || primary.name
+        }
+      : null
   })
 
-  const handleModelChange = (type: string, id: string, name: string) => {
+  const handleModelChange = (type: string, id: string, name: string, modelName: string) => {
     const updated = (modelConfig as any)[type].map((m: any) => ({ ...m, isPrimary: m.id === id }))
     setModelConfig(type, updated)
-    setCurrentModel({ type, name })
+    setCurrentModel({ type, name, modelName })
   }
 
   const modelMenuItems: MenuProps['items'] = (['dialogue', 'image', 'video', 'multimodal'] as const).map(type => {
@@ -76,12 +83,16 @@ const InputArea: React.FC = () => {
         ? enabled.map((m: any) => ({
             key: m.id,
             label: (
-              <span className="flex items-center justify-between gap-6">
-                <span>{m.name || m.modelName}</span>
+              <span className="flex items-center gap-2">
+                {/* 模型名称为主，服务商灰色小字附带 */}
+                <span>{m.modelName || m.name}</span>
+                <span className="text-inkMuted text-[10px]">
+                  {m.provider || (m.name || '').split(' · ')[0]}
+                </span>
                 {m.isPrimary && <CheckOutlined className="text-primary text-xs" />}
               </span>
             ),
-            onClick: () => handleModelChange(type, m.id, m.name || m.modelName)
+            onClick: () => handleModelChange(type, m.id, m.name || m.modelName, m.modelName || m.name)
           }))
         : [{ key: `${type}-empty`, label: '暂无已启用模型', disabled: true }]
     }
@@ -116,6 +127,29 @@ const InputArea: React.FC = () => {
       )
     : []
   const showCommandMenu = inputText.startsWith('/') && filteredCommands.length > 0
+
+  // 挂载时消费挂起的填充请求（例如从模板管理页点击条目后返回聊天）
+  useEffect(() => {
+    const pending = consumePendingFill()
+    if (pending) {
+      setInputText(pending)
+      setIntent(null)
+      textareaRef.current?.focus()
+    }
+  }, [])
+
+  // 切换会话时清空输入框（避免一份内容出现在每个会话）。
+  // 用"上一次会话 ID"对比判断：StrictMode 重复执行 effect 时是幂等的，
+  // 不会误清首次挂载时消费到的"待填充内容"。
+  const prevSessionIdRef = useRef(activeSessionId)
+  useEffect(() => {
+    if (prevSessionIdRef.current === activeSessionId) return
+    prevSessionIdRef.current = activeSessionId
+    setInputText('')
+    setImages([])
+    setTextAttachments([])
+    setIntent(null)
+  }, [activeSessionId])
 
   // 监听业务导航的 Prompt 填充事件
   // 兼容旧字符串载荷，同时接收 { text, intent } 对象（视觉无变化，intent 用于后端路由）
@@ -421,7 +455,7 @@ const InputArea: React.FC = () => {
           }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder={'输入需求... (Enter 发送，Shift+Enter 换行)'}
+          placeholder={'描述你的需求，例如：帮我写一份招聘启事…（Enter 发送，Shift+Enter 换行）'}
           className="w-full bg-transparent p-3 pb-1 border-none text-ink resize-none overflow-y-auto outline-none placeholder:text-inkMuted"
           style={{ height: inputHeight }}
         />
@@ -463,7 +497,7 @@ const InputArea: React.FC = () => {
                 title="选择模型"
                 className="flex items-center gap-1 text-xs text-inkSecondary hover:text-primary transition-colors max-w-[160px] px-1 py-1 rounded-md"
               >
-                <span className="truncate">{currentModel ? currentModel.name : '选择模型'}</span>
+                <span className="truncate">{currentModel ? currentModel.modelName : '选择模型'}</span>
                 <DownOutlined className="text-[10px] shrink-0" />
               </button>
             </Dropdown>

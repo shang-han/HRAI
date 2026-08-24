@@ -78,6 +78,8 @@ const TopBar: React.FC = () => {
   const [updateModalOpen, setUpdateModalOpen] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  // 模型配置抽屉当前激活的标签页（footer 保存按钮按此触发对应类型的保存）
+  const [modelTabKey, setModelTabKey] = useState('dialogue')
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
 
@@ -224,13 +226,31 @@ const TopBar: React.FC = () => {
       </div>
 
       {/* 模型配置抽屉 */}
-      <Drawer title="模型接入配置" open={modelConfigOpen} onClose={() => setModelConfigOpen(false)} width={720}>
-        <Tabs items={[
-          { key: 'dialogue', label: '对话模型', children: <ModelConfigSection type="dialogue" providers={modelConfig.dialogue} onSave={(p) => setModelConfig('dialogue', p)} /> },
-          { key: 'image', label: '图片模型', children: <ModelConfigSection type="image" providers={modelConfig.image} onSave={(p) => setModelConfig('image', p)} /> },
-          { key: 'video', label: '视频模型', children: <ModelConfigSection type="video" providers={modelConfig.video} onSave={(p) => setModelConfig('video', p)} /> },
-          { key: 'multimodal', label: '多模态模型', children: <ModelConfigSection type="multimodal" providers={modelConfig.multimodal} onSave={(p) => setModelConfig('multimodal', p)} /> },
-        ]} />
+      <Drawer
+        title="模型接入配置"
+        open={modelConfigOpen}
+        onClose={() => setModelConfigOpen(false)}
+        width={720}
+        footer={
+          <Button
+            type="primary"
+            block
+            onClick={() => window.dispatchEvent(new CustomEvent('model-config-save', { detail: modelTabKey }))}
+          >
+            保存配置
+          </Button>
+        }
+      >
+        <Tabs
+          activeKey={modelTabKey}
+          onChange={setModelTabKey}
+          items={[
+            { key: 'dialogue', label: '对话模型', children: <ModelConfigSection type="dialogue" providers={modelConfig.dialogue} onSave={(p) => { setModelConfig('dialogue', p); setModelConfigOpen(false) }} /> },
+            { key: 'image', label: '图片模型', children: <ModelConfigSection type="image" providers={modelConfig.image} onSave={(p) => { setModelConfig('image', p); setModelConfigOpen(false) }} /> },
+            { key: 'video', label: '视频模型', children: <ModelConfigSection type="video" providers={modelConfig.video} onSave={(p) => { setModelConfig('video', p); setModelConfigOpen(false) }} /> },
+            { key: 'multimodal', label: '多模态模型', children: <ModelConfigSection type="multimodal" providers={modelConfig.multimodal} onSave={(p) => { setModelConfig('multimodal', p); setModelConfigOpen(false) }} /> },
+          ]}
+        />
       </Drawer>
 
       {/* 渠道接入抽屉 */}
@@ -426,6 +446,17 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
     setTestResults({})
   }, [providers])
 
+  // 抽屉底部 footer 的"保存配置"按钮通过事件触发（只响应当前激活的类型）
+  const saveRef = useRef<() => void>(() => {})
+  useEffect(() => { saveRef.current = handleSave })
+  useEffect(() => {
+    const h = (e: Event) => {
+      if ((e as CustomEvent).detail === type) saveRef.current()
+    }
+    window.addEventListener('model-config-save', h)
+    return () => window.removeEventListener('model-config-save', h)
+  }, [type])
+
   const isDialogue = type === 'dialogue'
   const defaultModel = items.find(p => p.enabled && p.isPrimary) || items.find(p => p.enabled)
   const presetsAvailable = MODEL_PRESETS.filter(p => p.type === type && !items.some(i => i.id === p.id))
@@ -549,10 +580,9 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
   }
 
   const handleSave = async () => {
-    // 校验：对话类型至少需要一个启用的模型
+    // 仅提示不阻止：允许先不启用对话模型（例如只配置图片/视频模型）
     if (isDialogue && !items.some(p => p.enabled)) {
-      message.warning('请至少启用一个对话模型')
-      return
+      message.warning('当前未启用任何对话模型，文本聊天将无法使用')
     }
     setSaving(true)
     try {
@@ -593,6 +623,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
             <Card
               key={provider.id}
               size="small"
+              style={{ borderColor: 'var(--color-line)' }}
               title={
                 <div className="flex items-center gap-2">
                   {isDialogue && (
@@ -714,8 +745,21 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                 {isDialogue && (
                   <>
                     <div className="md:col-span-2">
-                      <label className="text-xs text-inkMuted mb-1 block">
-                        温度（Temperature）: <span className="font-medium">{provider.params?.temperature ?? 0.7}</span>
+                      <label className="text-xs text-inkMuted mb-1 flex items-center gap-1">
+                        温度: <span className="font-medium">{provider.params?.temperature ?? 0.7}</span>
+                        <Tooltip
+                          title={
+                            <div className="text-xs leading-relaxed">
+                              <p>控制输出随机程度：</p>
+                              <p>0~0.3 稳定保守，适合正式制度、报表；</p>
+                              <p>0.5~0.8 平衡，适合日常对话（默认 0.7）；</p>
+                              <p>0.9~1.5 更具创意与多样性。</p>
+                              <p>文档类任务建议 0.3~0.5，输出更稳定。</p>
+                            </div>
+                          }
+                        >
+                          <QuestionCircleOutlined className="cursor-help text-inkMuted hover:text-primary text-sm ml-1.5" />
+                        </Tooltip>
                       </label>
                       <Slider
                         min={0}
@@ -760,13 +804,6 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
         <Button size="small" icon={<PlusOutlined />} onClick={addCustom}>添加自定义模型</Button>
       </div>
 
-      <Divider style={{ margin: '12px 0' }} />
-
-      <div className="flex justify-end">
-        <Button type="primary" onClick={handleSave} loading={saving}>
-          保存配置
-        </Button>
-      </div>
     </div>
   )
 }

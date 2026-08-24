@@ -22,8 +22,9 @@ interface ChatMessage {
 
 // 任务类型关键词映射
 const TASK_KEYWORDS: Record<string, string[]> = {
-  image: ['生成图片', '画', '绘图', '流程图', '架构图', '示意图', '插图'],
-  video: ['视频脚本', '分镜', '短视频', '培训视频'],
+  // 注意：只匹配"生成意图"的措辞，避免"写个视频脚本"这类文本任务被误路由
+  image: ['生成图片', '生成一张图', '画一张', '画个', '画一幅', '生成海报', '设计海报', '生成流程图', '生成架构图', '生成示意图', '生成插图'],
+  video: ['生成视频', '生成短视频', '做个视频', '做一个视频', '制作视频', '文生视频'],
   multimodal: ['分析图片', '识别', '看图', '图片内容', '图文分析']
 }
 
@@ -210,13 +211,22 @@ export class ModelRouter {
   /**
    * 检测任务类型
    */
-  private detectTaskType(message: string): 'dialogue' | 'image' | 'video' | 'multimodal' {
+  detectTaskType(message: string): 'dialogue' | 'image' | 'video' | 'multimodal' {
     for (const [type, keywords] of Object.entries(TASK_KEYWORDS)) {
       if (keywords.some(kw => message.includes(kw))) {
         return type as any
       }
     }
     return 'dialogue'
+  }
+
+  /**
+   * 返回该类型下"被选中（isPrimary）且已启用"的模型，否则退回第一个已启用的；
+   * 与对话模型语义一致：输入框下拉选中的模型就是实际使用的模型。
+   */
+  getFirstEnabled(type: 'image' | 'video' | 'multimodal'): ModelProvider | null {
+    const list = this.storageManager.getConfig()?.modelConfig?.[type] || []
+    return list.find(p => p.enabled && p.isPrimary) || list.find(p => p.enabled) || null
   }
 
   /**
