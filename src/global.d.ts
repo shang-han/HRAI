@@ -55,6 +55,13 @@ declare global {
         import: (filePath: string) => Promise<{ success: boolean; templates?: any[]; error?: string }>
         export: (filePath: string) => Promise<{ success: boolean; error?: string }>
       }
+      schedule: {
+        list: () => Promise<Array<{ id: string; title: string; content: string; dueAt: string; repeat: 'none' | 'daily' | 'weekly' | 'monthly'; kind: 'reminder' | 'task'; sessionId: string; enabled: boolean; lastFiredAt?: string | null; createdAt: string }>>
+        create: (task: { title: string; content?: string; dueAt?: string; repeat?: 'none' | 'daily' | 'weekly' | 'monthly'; kind?: 'reminder' | 'task'; sessionId?: string }) => Promise<{ success: boolean; task?: any; error?: string }>
+        update: (id: string, updates: any) => Promise<{ success: boolean }>
+        delete: (id: string) => Promise<{ success: boolean }>
+        onFired: (callback: (task: any) => void) => () => void
+      }
       file: {
         export: (format: string, content: any, filePath?: string) => Promise<{ success: boolean; message?: string; error?: string }>
         import: () => Promise<{ success: boolean; content?: string; type?: string; error?: string }>

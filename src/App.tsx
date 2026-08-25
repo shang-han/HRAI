@@ -33,6 +33,14 @@ const App: React.FC = () => {
     const handleStop = () => stopGenerating()
     window.addEventListener('stopGeneration', handleStop)
 
+    // 定时提醒/任务触发后，若目标会话是当前会话则刷新消息
+    const handleScheduleFired = (data: any) => {
+      if (data?.sessionId && data.sessionId === useSessionStore.getState().activeSessionId) {
+        useSessionStore.getState().refreshMessages(data.sessionId)
+      }
+    }
+    const offSchedule = window.electronAPI.schedule.onFired(handleScheduleFired)
+
     // 检查激活状态
     checkActivation()
 
@@ -53,6 +61,7 @@ const App: React.FC = () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
       window.removeEventListener('stopGeneration', handleStop)
+      offSchedule()
     }
   }, [])
 
