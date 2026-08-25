@@ -31,13 +31,19 @@ const FALLBACK_COMMANDS = [
   { name: 'version', description: 'Show Hermes version' },
 ]
 
+// 输入框高度区间：单行起步，最多撑到 260px 后内部滚动
+const INPUT_MIN_H = 48
+const INPUT_MAX_H = 260
+
 const InputArea: React.FC = () => {
   const [inputText, setInputText] = useState('')
   const [images, setImages] = useState<string[]>([])
   // 文本附件：大文本/JSON/CSV 以附件形式随消息发送（≤50KB 的小文件仍直接进输入框）
   const [textAttachments, setTextAttachments] = useState<{ name: string; content: string }[]>([])
-  // 输入框高度：可拖动手柄上下拉伸（48px ~ 260px），默认单行高度
-  const [inputHeight, setInputHeight] = useState(48)
+  // 输入框高度：默认跟着内容自动增高；一旦手动拖过手柄就以手动值为准（双击手柄恢复自动）
+  const [autoHeight, setAutoHeight] = useState(INPUT_MIN_H)
+  const [manualHeight, setManualHeight] = useState<number | null>(null)
+  const inputHeight = manualHeight ?? autoHeight
   const [resizing, setResizing] = useState(false)
   const [intent, setIntent] = useState<{ hint?: string; id?: string } | null>(null)
   const [showRichFormatWarning, setShowRichFormatWarning] = useState(false)
@@ -119,14 +125,32 @@ const InputArea: React.FC = () => {
 
 
 
-  // 拖动调整输入框高度（向上拉撑高，向下压回缩）
+  // 内容变化时重新量高。必须先把 height 置为 auto 才能读到真实内容高度，
+  // 否则 scrollHeight 会被当前 height 撑住、只增不减（删字时收不回去）。
+  useEffect(() => {
+    if (manualHeight !== null) return
+    const el = textareaRef.current
+    if (!el) return
+    const prev = el.style.height
+    el.style.height = 'auto'
+    const next = Math.min(INPUT_MAX_H, Math.max(INPUT_MIN_H, el.scrollHeight))
+    el.style.height = prev
+    setAutoHeight(next)
+  }, [inputText, manualHeight])
+
+  // 拖动调整输入框高度（向上拉撑高，向下压回缩）；拖过之后接管高度不再自动跳动
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
     const startY = e.clientY
     const startHeight = inputHeight
+    let engaged = false
     setResizing(true)
     const onMove = (ev: MouseEvent) => {
-      setInputHeight(Math.min(260, Math.max(48, startHeight + (startY - ev.clientY))))
+      const delta = startY - ev.clientY
+      // 3px 死区：避免只想点一下手柄时手抖 1px 就把高度锁进手动模式
+      if (!engaged && Math.abs(delta) < 3) return
+      engaged = true
+      setManualHeight(Math.min(INPUT_MAX_H, Math.max(INPUT_MIN_H, startHeight + delta)))
     }
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
@@ -146,6 +170,9 @@ const InputArea: React.FC = () => {
       )
     : []
   const showCommandMenu = inputText.startsWith('/') && filteredCommands.length > 0
+
+  // 有内容才算"可发送"：驱动发送按钮从灰色小圆变形成渐变胶囊
+  const canSend = inputText.trim().length > 0 || images.length > 0 || textAttachments.length > 0
 
   // 挂载时消费挂起的填充请求（例如从模板管理页点击条目后返回聊天）
   useEffect(() => {
@@ -375,7 +402,7 @@ const InputArea: React.FC = () => {
   }
 
   return (
-    <div className="shrink-0 p-4 bg-surface">
+    <div className="shrink-0 w-full max-w-[820px] mx-auto px-4 pb-4 pt-1">
       {/* 附件预览：图片 + 文本附件 */}
       {(images.length > 0 || textAttachments.length > 0) && (
         <div className="flex gap-2 mb-2 flex-wrap items-center">
@@ -394,7 +421,7 @@ const InputArea: React.FC = () => {
           {textAttachments.map((a, i) => (
             <div
               key={a.name + i}
-              className="flex items-center gap-1.5 bg-surfaceSubtle dark:bg-canvas border border-line rounded-lg pl-2 pr-1 py-1 text-xs text-inkSecondary max-w-[220px]"
+              className="hermes-glass-subtle flex items-center gap-1.5 rounded-xl pl-2 pr-1 py-1 text-xs text-inkSecondary max-w-[220px]"
             >
               <FileTextOutlined className="shrink-0" />
               <span className="truncate">{a.name}</span>
@@ -422,7 +449,7 @@ const InputArea: React.FC = () => {
 
       {/* 斜杠命令补全 */}
       {showCommandMenu && (
-        <div className="mb-2 border border-line rounded-lg bg-surface shadow-lg overflow-hidden">
+        <div className="hermes-glass-pop mb-2 rounded-2xl overflow-hidden">
           {filteredCommands.map((cmd, i) => (
             <div
               key={cmd.name}
@@ -432,10 +459,10 @@ const InputArea: React.FC = () => {
                 setCommandIndex(0)
                 textareaRef.current?.focus()
               }}
-              className={`px-3 py-2 cursor-pointer text-sm flex items-center justify-between gap-4 ${
+              className={`px-3.5 py-2 cursor-pointer text-sm flex items-center justify-between gap-4 transition-colors ${
                 i === commandIndex
-                  ? 'bg-primary/10 text-primary'
-                  : 'hover:bg-surfaceSubtle dark:hover:bg-canvas'
+                  ? 'bg-primarySoft text-primary'
+                  : 'hover:bg-primarySoft'
               }`}
             >
               <span className="font-medium">/{cmd.name}</span>
@@ -454,89 +481,97 @@ const InputArea: React.FC = () => {
         </div>
       )}
 
-      {/* 输入框高度拖动手柄：悬停/拖动时变主色 */}
+      {/* 输入框高度拖动手柄：悬停/拖动时变主色，双击恢复"跟随内容自动增高" */}
       <div
-        className={`group flex justify-center pt-1 cursor-ns-resize select-none ${resizing ? 'cursor-grabbing' : ''}`}
+        className={`hermes-resize-handle flex justify-center pt-1 pb-1.5 cursor-ns-resize select-none ${resizing ? 'is-resizing cursor-grabbing' : ''}`}
         onMouseDown={startResize}
-        title="拖动调整输入框高度"
+        onDoubleClick={() => setManualHeight(null)}
+        title={manualHeight === null ? '拖动调整输入框高度（当前跟随内容自动增高）' : '拖动调整高度，双击恢复自动增高'}
       >
-        <div className={`w-10 h-1.5 rounded-full transition-colors ${resizing ? 'bg-primary' : 'bg-line dark:bg-lineDark group-hover:bg-primary'}`} />
+        <div className="hermes-resize-grip" />
       </div>
 
-      {/* 输入框：外框容器内，上部分文字区，底部一行按钮（发送图标框内右下角） */}
-      <div className="border border-line rounded-lg bg-canvas focus-within:border-primary transition-colors">
-        <textarea
-          ref={textareaRef}
-          value={inputText}
-          onChange={e => {
-            setInputText(e.target.value)
-            setCommandIndex(0)
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={'描述你的需求，例如：帮我写一份招聘启事…（Enter 发送，Shift+Enter 换行）'}
-          className="w-full bg-transparent p-3 pb-1 border-none text-ink resize-none overflow-y-auto outline-none placeholder:text-inkMuted"
-          style={{ height: inputHeight }}
-        />
-        <div className="flex justify-between items-center gap-2 px-2.5 pb-2.5 pt-1">
-          {/* 左侧：上传/导出/模板小图标（原工具栏收进输入框内） */}
-          <div className="flex items-center gap-1">
-            <Tooltip title="上传文件/图片">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="p-1.5 rounded-md text-inkMuted hover:text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas transition-colors"
-              >
-                <PaperClipOutlined className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip title="导出文档">
-              <button
-                onClick={handleExport}
-                className="p-1.5 rounded-md text-inkMuted hover:text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas transition-colors"
-              >
-                <ExportOutlined className="text-sm" />
-              </button>
-            </Tooltip>
-            <Tooltip title="预设指令库">
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('openTemplates'))}
-                className="p-1.5 rounded-md text-inkMuted hover:text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas transition-colors"
-              >
-                <AppstoreOutlined className="text-sm" />
-              </button>
-            </Tooltip>
-          </div>
-          {/* 右侧：模型二级菜单 + 停止/发送 */}
-          <div className="flex items-center gap-2">
-            <Dropdown
-              trigger={['hover']}
-              menu={{ items: modelMenuItems, triggerSubMenuAction: 'hover' }}
-            >
-              <button
-                title="选择模型"
-                className="flex items-center gap-1 text-xs text-inkSecondary hover:text-primary transition-colors max-w-[160px] px-1 py-1 rounded-md"
-              >
-                <span className="truncate">{currentModel ? currentModel.modelName : '选择模型'}</span>
-                <DownOutlined className="text-[10px] shrink-0" />
-              </button>
-            </Dropdown>
-            <Button
-              type="primary"
-              shape="circle"
-              icon={<SendOutlined />}
-              onClick={handleSend}
-              title="发送"
+      {/* 输入框：胶囊外壳 + 聚焦/生成时渐变光带绕框流转 + 背后呼吸柔光 */}
+      <div className={`hermes-input-wrap ${isLoading ? 'is-busy' : ''}`}>
+        <div className="hermes-input-glow" aria-hidden="true" />
+        <div className="hermes-input-shell">
+          <div className="hermes-input-body">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={inputText}
+              onChange={e => {
+                setInputText(e.target.value)
+                setCommandIndex(0)
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={'描述你的需求，例如：帮我写一份招聘启事…（Enter 发送，Shift+Enter 换行）'}
+              className="block w-full bg-transparent px-5 pt-3.5 pb-1 border-none text-ink resize-none overflow-y-auto outline-none placeholder:text-inkMuted"
+              style={{ height: inputHeight }}
             />
-            {isLoading && (
-              <Button
-                type="primary"
-                danger
-                shape="circle"
-                icon={<StopOutlined />}
-                onClick={handleStop}
-                title="停止"
-              />
-            )}
+            <div className="flex justify-between items-center gap-2 px-3.5 pb-2.5 pt-1">
+              {/* 左侧：上传/导出/模板小图标（原工具栏收进输入框内） */}
+              <div className="flex items-center gap-1">
+                <Tooltip title="上传文件/图片">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="hermes-icon-btn p-1.5"
+                  >
+                    <PaperClipOutlined className="text-sm" />
+                  </button>
+                </Tooltip>
+                <Tooltip title="导出文档">
+                  <button
+                    onClick={handleExport}
+                    className="hermes-icon-btn p-1.5"
+                  >
+                    <ExportOutlined className="text-sm" />
+                  </button>
+                </Tooltip>
+                <Tooltip title="预设指令库">
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('openTemplates'))}
+                    className="hermes-icon-btn p-1.5"
+                  >
+                    <AppstoreOutlined className="text-sm" />
+                  </button>
+                </Tooltip>
+              </div>
+              {/* 右侧：模型二级菜单 + 停止/发送 */}
+              <div className="flex items-center gap-2">
+                <Dropdown
+                  trigger={['hover']}
+                  menu={{ items: modelMenuItems, triggerSubMenuAction: 'hover' }}
+                >
+                  <button
+                    title="选择模型"
+                    className="flex items-center gap-1 text-xs text-inkSecondary hover:text-primary transition-colors max-w-[160px] px-1.5 py-1 rounded-full"
+                  >
+                    <span className="truncate">{currentModel ? currentModel.modelName : '选择模型'}</span>
+                    <DownOutlined className="text-[10px] shrink-0" />
+                  </button>
+                </Dropdown>
+                {isLoading && (
+                  <Button
+                    type="primary"
+                    danger
+                    shape="circle"
+                    icon={<StopOutlined />}
+                    onClick={handleStop}
+                    title="停止"
+                  />
+                )}
+                <button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  title={canSend ? '发送（Enter）' : '请先输入内容'}
+                  className={`hermes-send-btn ${canSend ? 'is-ready' : ''}`}
+                >
+                  <SendOutlined className="text-sm" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

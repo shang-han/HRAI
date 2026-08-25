@@ -24,6 +24,8 @@ const App: React.FC = () => {
   const loadConfig = useConfigStore(state => state.loadConfig)
   const stopGenerating = useSessionStore(state => state.stopGenerating)
   const activeSessionId = useSessionStore(state => state.activeSessionId)
+  // 空态判定：决定输入框居中还是落底（只订阅长度，避免流式更新时整个 App 重渲染）
+  const emptyChat = useSessionStore(state => state.messages.length === 0)
 
   useEffect(() => {
     // 加载配置（模型、主题、快捷键等）
@@ -171,11 +173,18 @@ const App: React.FC = () => {
               {/* 顶部栏 */}
               <TopBar />
 
-              {/* 聊天区域 */}
-              <ChatArea />
-
-              {/* 输入区域 */}
-              <InputArea />
+              {/* 聊天区：浅蓝渐变底，消息与镂空输入框都浮在上面。
+                  空态时上下两个弹性占位把「问候语 + 输入框」整体垂直居中；
+                  发出第一条消息后占位收成 hidden，ChatArea 吃掉 flex-1，
+                  输入框自然落回底部。ChatArea / InputArea 始终留在同一个树位置，
+                  不会卸载重挂——否则第一次发送后输入框会丢焦点。 */}
+              <div className="hermes-chat-canvas flex-1 min-h-0 flex flex-col">
+                <div className={emptyChat ? 'flex-1 min-h-0' : 'hidden'} />
+                <ChatArea />
+                <InputArea />
+                {/* 底部占位略大于顶部：让整块内容坐在视觉中心稍上方，观感更稳 */}
+                <div className={emptyChat ? 'flex-[1.25] min-h-0' : 'hidden'} />
+              </div>
             </>
           )}
         </main>
