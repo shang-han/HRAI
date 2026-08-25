@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useConfigStore } from '../store/configStore'
+import { HR_MENU } from '../data/hr-menu'
 import { Modal, Input, Button } from 'antd'
 import {
   PlusOutlined,
@@ -55,47 +56,9 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
     setRenameValue('')
   }
 
-  // 业务导航数据
-  const businessNav = [
-    {
-      name: '📘 人力资源中心',
-      children: [
-        {
-          name: '1.1 招聘管理',
-          items: ['招聘需求提报单', '岗位JD撰写 & 招聘启事', '岗位说明书更新编制', '招聘渠道管理台账', '简历筛选评分表', '人才库储备登记表', '面试安排通知单', '面试官对接沟通清单', '初试面试评估表', '复试面试评估表', '录用审批单', 'Offer录用通知书', '薪资谈判沟通方案', '招聘月度数据统计报表']
-        },
-        {
-          name: '1.2 入职管理',
-          items: ['入职资料审核清单', '新员工入职登记表', '劳动合同签订指引', '工位账号权限开通申请单', '新员工入职须知', '入职欢迎文案', '入职礼包清单', '7天入职跟进记录表', '30天入职跟进记录表', '60天入职跟进记录表']
-        },
-        {
-          name: '1.3 员工档案管理',
-          items: ['员工电子档案模板', '人员信息维护变更登记表', '岗位异动档案记录单', '证照证书学历存档登记表', '员工花名册表格', '档案合规自查方案', '员工隐私安全管理制度']
-        },
-        {
-          name: '1.4 考勤排班管理',
-          items: ['排班表制定模板', '轮班管理制度', '打卡记录核对台账', '事假请假审批单', '病假请假审批单', '年假请假审批单', '婚假请假审批单', '产假请假审批单', '加班申请审批单', '加班统计台账', '加班调休申请单', '迟到早退旷工统计表', '月度考勤汇总报表', '考勤异常处理通知单', '考勤管理制度']
-        },
-        {
-          name: '1.5 薪酬薪资管理',
-          items: ['薪资结构设计方案', '月度薪资核算表', '社保公积金基数核算表', '员工薪资条模板', '薪资发放通知公告', '年终奖核算方案', '员工调薪审批单']
-        }
-      ]
-    },
-    {
-      name: '📙 行政综合中心',
-      children: [
-        {
-          name: '2.1 行政制度管理',
-          items: ['办公用品管理制度', '办公环境卫生管理规定']
-        },
-        {
-          name: '2.2 资产后勤管理',
-          items: ['固定资产台账模板']
-        }
-      ]
-    }
-  ]
+  // 业务导航数据：与公共预设指令库同源（src/data/hr-menu.ts），
+  // 改动菜单结构只需维护那份数据文件
+  const businessNav = HR_MENU
 
   if (collapsed) {
     return (
@@ -256,7 +219,7 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
                     {/* 二级：模块 */}
                     <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${catOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                       <div className="overflow-hidden min-h-0">
-                        {category.children.map((module, mi) => {
+                        {category.modules.map((module, mi) => {
                           const modOpen = expandedModules[module.name] ?? false
                           return (
                             <div key={mi}>
@@ -267,33 +230,31 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
                                 <span className="truncate">{module.name}</span>
                                 <CaretRightOutlined className={`shrink-0 text-xs transition-transform duration-300 ${modOpen ? 'rotate-90' : 'rotate-0'}`} />
                               </div>
-                              {/* 三级：功能项 */}
+                              {/* 三级：业务指令项 */}
                               <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${modOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                                 <div className="overflow-hidden min-h-0">
-                                  {module.items.map((item, ii) => (
+                                  {module.leaves.map((item, ii) => (
                                     <div
                                       key={ii}
                                       className="text-sm py-1 pl-8 pr-2 rounded-md hover:bg-primarySoft cursor-pointer transition-all text-inkMuted hover:text-primary"
                                       onClick={async () => {
-                                        // 导航条目与预设指令库模板一一对应：
-                                        // 有同名模板时填入模板完整内容，否则回退为简短指令
-                                        let text = `请生成：${item}`
+                                        // 优先取指令库中同分类同名模板内容（在指令库编辑后导航同步生效），
+                                        // 否则用内置提示词
+                                        let text = item.prompt
                                         try {
                                           const tpls: any[] = await window.electronAPI.template.list()
                                           const tpl = tpls.find((t: any) =>
-                                            t.name === item ||
-                                            item.startsWith(t.name) ||
-                                            t.name.startsWith(item)
+                                            t.name === item.name && t.category === `${category.key}/${module.name}`
                                           )
                                           if (tpl?.content) text = tpl.content
-                                        } catch { /* 模板加载失败时用简短指令 */ }
+                                        } catch { /* 模板加载失败时用内置提示词 */ }
                                         const event = new CustomEvent('fillPrompt', {
-                                          detail: { text, intent: { hint: item } }
+                                          detail: { text, intent: { hint: item.name } }
                                         })
                                         window.dispatchEvent(event)
                                       }}
                                     >
-                                      {item}
+                                      {item.name}
                                     </div>
                                   ))}
                                 </div>

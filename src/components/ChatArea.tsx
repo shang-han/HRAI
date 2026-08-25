@@ -1,13 +1,38 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { MessageOutlined } from '@ant-design/icons'
+
+/** "思考过程"后的三个跳动省略点（主题色，表示进行中/可点击） */
+const ThinkingDots: React.FC = () => (
+  <span className="flex items-center gap-0.5">
+    {[0, 150, 300].map(delay => (
+      <span
+        key={delay}
+        className="w-1 h-1 bg-primary rounded-full animate-bounce"
+        style={{ animationDelay: `${delay}ms` }}
+      />
+    ))}
+  </span>
+)
 
 const ChatArea: React.FC = () => {
   const { messages, isLoading } = useSessionStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const lastUserMsgIdRef = useRef<string | null>(null)
+  // 已展开"思考过程"的消息 id 集合（默认全部折叠，点开后进入此集合）
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set())
+
+  const toggleThinking = (id: string) => {
+    setExpandedThinking(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const isNearBottom = () => {
     const el = scrollRef.current
@@ -140,14 +165,40 @@ const ChatArea: React.FC = () => {
             {/* 文本内容 */}
             {message.role === 'assistant' ? (
               <div>
-                {/* 思考过程 */}
+                {/* 思考过程：标题行（主题色 + 跳动点）始终在灰底内容区内，
+                    折叠时只收起内容、保留底色；展开/收缩带慢动画；
+                    下方居中一条伸缩条（与输入框伸缩手柄同色） */}
                 {message.thinking && (
-                  <details className="mb-2 text-sm text-inkMuted">
-                    <summary className="cursor-pointer hover:text-primary">💭 思考过程</summary>
-                    <div className="mt-1 p-2 bg-surfaceSubtle dark:bg-canvas rounded-lg text-xs whitespace-pre-wrap">
-                      {message.thinking}
+                  <div className="mb-2 text-xs">
+                    <div className="p-2 bg-surfaceSubtle dark:bg-canvas rounded-lg">
+                      {/* 标题行：位置固定，点击展开/收缩（默认折叠） */}
+                      <div
+                        className="inline-flex items-center gap-1 cursor-pointer select-none text-primary hover:opacity-80"
+                        onClick={() => toggleThinking(message.id)}
+                        title={expandedThinking.has(message.id) ? '收起思考过程' : '展开思考过程'}
+                      >
+                        <MessageOutlined className="text-primary" />
+                        思考过程
+                        <ThinkingDots />
+                      </div>
+                      {/* 内容：grid 行高 0fr↔1fr 过渡，展开收缩带动画 */}
+                      <div
+                        className="grid transition-[grid-template-rows] duration-300 ease-out"
+                        style={{ gridTemplateRows: expandedThinking.has(message.id) ? '1fr' : '0fr' }}
+                      >
+                        <div className="overflow-hidden min-h-0">
+                          <div className="mt-1 whitespace-pre-wrap text-inkMuted">{message.thinking}</div>
+                        </div>
+                      </div>
                     </div>
-                  </details>
+                    <div
+                      className="group flex justify-center pt-1 cursor-pointer select-none"
+                      onClick={() => toggleThinking(message.id)}
+                      title={expandedThinking.has(message.id) ? '收起思考过程' : '展开思考过程'}
+                    >
+                      <div className="w-10 h-1.5 rounded-full bg-line dark:bg-lineDark group-hover:bg-primary transition-colors" />
+                    </div>
+                  </div>
                 )}
                 <div className="markdown-content">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>

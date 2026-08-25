@@ -305,10 +305,11 @@ const TopBar: React.FC = () => {
               <Radio.Button value="auto">完全放开</Radio.Button>
               <Radio.Button value="readonly">只读保护</Radio.Button>
             </Radio.Group>
-            <div className="text-xs text-gray-500 mt-2 space-y-1">
-              <p>· 审批模式：删除、覆写、执行命令等高风险操作前弹窗确认（推荐）</p>
-              <p>· 完全放开：所有操作自动允许，不再询问</p>
-              <p>· 只读保护：拒绝所有写/删/执行类权限请求，仅允许读取</p>
+            <div className="text-xs text-inkMuted mt-2 space-y-1.5">
+              <p>· 审批模式（推荐）：AI 写文件、执行命令等操作前会弹窗征求你的同意，日常使用选这项</p>
+              <p>· 完全放开：所有操作直接执行、不再询问，适合完全信任 AI 的场景</p>
+              <p>· 只读保护：AI 只能查询和读取，不能修改文件或执行命令，适合演示、访客使用</p>
+              <p className="pt-1">当 AI 的操作被当前模式拦截时，它会告诉你原因并指导你如何调整；也可以随时回到这里修改。</p>
             </div>
           </div>
           <Divider />
@@ -415,12 +416,21 @@ const TopBar: React.FC = () => {
           { key: 'export', label: '导出技巧', children: <p className="text-sm">在对话中输入"导出为Word/Excel/PPT"即可触发文件导出。建议在指令中明确要求结构化输出以获得更好的排版效果。</p> },
           { key: 'security', label: '安全说明', children: <p className="text-sm">所有数据（API Key、聊天记录、企业文档）均保存在本地，不会上传至任何外部服务器。</p> },
           { key: 'shortcuts', label: '快捷键', children: (
-            <div className="text-sm space-y-1">
-              <p>Enter — 发送（单行模式）</p>
-              <p>Shift + Enter — 换行（单行模式）</p>
-              <p>Ctrl + Enter — 发送（多行模式）</p>
-              <p>Ctrl + B — 切换侧边栏</p>
-              <p>Ctrl + N — 新建会话</p>
+            <div className="text-sm space-y-3">
+              {[
+                { title: '消息输入框', rows: [['发送消息', 'Enter'], ['换行', 'Shift + Enter'], ['选中斜杠命令', '↑ / ↓ / Tab']] },
+                { title: '窗口', rows: [['退出程序', 'Ctrl + Q']] },
+              ].map(group => (
+                <div key={group.title}>
+                  <p className="font-medium mb-1 text-ink">{group.title}</p>
+                  {group.rows.map(([label, key]) => (
+                    <div key={label} className="flex items-center justify-between py-0.5 border-b border-line/50 last:border-0">
+                      <span className="text-inkSecondary">{label}</span>
+                      <span className="text-xs text-inkMuted">{key}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
             </div>
           )},
         ]} />

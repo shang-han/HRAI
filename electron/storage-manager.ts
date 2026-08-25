@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
+import { HR_MENU } from '../src/data/hr-menu'
 
 interface Session {
   id: string
@@ -139,7 +140,7 @@ export class StorageManager {
       this.saveJson(this.configFile, this.config)
     }
 
-    this.templates = this.loadJson<Template[]>(this.templateFile, this.getDefaultTemplates())
+    this.templates = this.migrateTemplates()
 
     // 如果没有会话，创建一个默认会话
     if (this.sessions.length === 0) {
@@ -659,26 +660,54 @@ export class StorageManager {
     }
   }
 
+  /**
+   * 内置模板：与业务导航同源（src/data/hr-menu.ts）。
+   * category = "中心key/模块名"，如 "人力资源中心/1.1 招聘管理"。
+   */
   private getDefaultTemplates(): Template[] {
-    return [
-      // 招聘管理
-      { id: 'hr-recruit-1', name: '招聘需求提报单', category: '人力资源/招聘管理', content: '请帮我生成一份招聘需求提报单，包含以下字段：部门、岗位名称、招聘人数、岗位要求、薪资范围、到岗时间要求、审批流程。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: 'hr-recruit-2', name: '岗位JD撰写', category: '人力资源/招聘管理', content: '请帮我撰写一份专业的岗位JD（职位描述），岗位名称：[请填写]，要求包含：岗位职责、任职要求、薪资福利、公司简介。语言要正式且吸引人。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: 'hr-recruit-3', name: '招聘启事', category: '人力资源/招聘管理', content: '请帮我撰写一份招聘启事，适用于社交媒体/招聘平台发布。岗位：[请填写]，要求风格专业但不死板，突出公司优势和岗位亮点。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      // 入职管理
-      { id: 'hr-onboard-1', name: '新员工入职登记表', category: '人力资源/入职管理', content: '请帮我生成一份新员工入职登记表模板，包含：基本信息、教育背景、工作经历、紧急联系人、银行账户信息、声明签字栏。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: 'hr-onboard-2', name: '入职欢迎文案', category: '人力资源/入职管理', content: '请帮我撰写一段新员工入职欢迎文案，语气热情友好，包含公司文化介绍、团队欢迎语、入职第一天指引。适合中小企业使用。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      // 员工档案
-      { id: 'hr-archive-1', name: '员工电子档案模板', category: '人力资源/员工档案管理', content: '请帮我设计一份员工电子档案模板，包含：基本信息、合同信息、岗位变动记录、培训记录、绩效记录、奖惩记录。要求结构清晰，便于维护更新。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      // 考勤管理
-      { id: 'hr-attend-1', name: '排班表制定模板', category: '人力资源/考勤排班管理', content: '请帮我生成一份月度排班表模板，适用于[请填写行业/岗位]。需包含：员工姓名、日期、班次（早班/中班/晚班/休息）、备注。请考虑劳动法关于休息日的规定。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      // 薪酬管理
-      { id: 'hr-salary-1', name: '薪资结构设计方案', category: '人力资源/薪酬薪资管理', content: '请帮我设计一份中小企业薪资结构方案，包含：基本工资、岗位工资、绩效工资、津贴补贴、年终奖的占比建议和计算方式。需要符合当地劳动法规。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      // 行政制度
-      { id: 'admin-sys-1', name: '办公用品管理制度', category: '行政综合中心/行政制度管理', content: '请帮我制定一份办公用品管理制度，包含：采购流程、领用规定、库存管理、报废处理、费用控制。适用于50-300人规模的中小企业。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      { id: 'admin-sys-2', name: '办公环境卫生管理规定', category: '行政综合中心/行政制度管理', content: '请帮我制定一份办公环境卫生管理规定，包含：日常清洁标准、责任分区、检查机制、奖惩措施。适用于中小企业办公环境管理。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-      // 资产管理
-      { id: 'admin-asset-1', name: '固定资产台账模板', category: '行政综合中心/资产后勤管理', content: '请帮我生成一份固定资产台账模板，包含：资产编号、资产名称、规格型号、购置日期、购置金额、使用部门、保管人、折旧方式、当前状态、报废处置。', isBuiltin: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-    ]
+    const now = new Date().toISOString()
+    const templates: Template[] = []
+    HR_MENU.forEach((c, ci) => {
+      c.modules.forEach((m, mi) => {
+        m.leaves.forEach((leafItem, li) => {
+          templates.push({
+            id: `menu-${ci}-${mi}-${li}`,
+            name: leafItem.name,
+            category: `${c.key}/${m.name}`,
+            content: leafItem.prompt,
+            isBuiltin: true,
+            createdAt: now,
+            updatedAt: now
+          })
+        })
+      })
+    })
+    return templates
+  }
+
+  /**
+   * 模板迁移合并：
+   * - 首次运行：直接写入新的内置模板集
+   * - 已有数据：保留自定义模板；内置模板仅保留仍在新菜单中的
+   *   （保留用户在指令库中的编辑），并补插新增的内置模板
+   */
+  private migrateTemplates(): Template[] {
+    const stored = this.loadJson<Template[] | null>(this.templateFile, null)
+    if (!stored || !Array.isArray(stored)) {
+      const defaults = this.getDefaultTemplates()
+      this.saveJson(this.templateFile, defaults)
+      return defaults
+    }
+
+    const defaults = this.getDefaultTemplates()
+    const defaultKeys = new Set(defaults.map(t => `${t.category}|${t.name}`))
+    const kept = stored.filter(t => !t.isBuiltin || defaultKeys.has(`${t.category}|${t.name}`))
+    const keptKeys = new Set(kept.map(t => `${t.category}|${t.name}`))
+    const missing = defaults.filter(d => !keptKeys.has(`${d.category}|${d.name}`))
+    const merged = [...kept, ...missing]
+    if (merged.length !== stored.length) {
+      this.saveJson(this.templateFile, merged)
+    }
+    return merged
   }
 }

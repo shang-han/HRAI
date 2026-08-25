@@ -222,9 +222,16 @@ export class HermesManager {
 
       // HERMES_GATEWAY_SESSION=1 让 execute_code（任意 Python）也进入 Hermes 审批门：
       // 否则 ACP 会话不属于网关上下文，execute_code 会直接放行，只读/询问模式拦不住。
+      // HERMES_ENVIRONMENT_HINT 把当前权限模式说明注入系统提示词（进程级固定），
+      // 让 Hermes 被拦截时能向用户解释原因并指导用户如何调整权限模式。
+      const permissionMode = this.permissionBridge?.getMode?.() || 'ask'
       this.process = spawn(this.pythonPath, ['-m', 'acp_adapter.entry'], {
         cwd: this.hermesPath,
-        env: { ...this.buildIsolatedEnv(), HERMES_GATEWAY_SESSION: '1' },
+        env: {
+          ...this.buildIsolatedEnv(),
+          HERMES_GATEWAY_SESSION: '1',
+          HERMES_ENVIRONMENT_HINT: this.buildPermissionHint(permissionMode)
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
       })
@@ -981,13 +988,14 @@ export class HermesManager {
 
   /**
    * 仅重启 ACP 智能体进程（不动渠道网关）。
-   * 切换到只读模式后调用：清除内存中的会话级批准记录（询问模式下
-   * "允许本次会话"残留的放行），并让新 approvals 配置完整生效。
+   * 权限模式切换后调用：清除内存中的会话级批准记录（询问模式下
+   * "允许本次会话"残留的放行），并让新的 approvals 配置与
+   * 进程级权限提示词（HERMES_ENVIRONMENT_HINT）完整生效。
    * 进程不会自动拉起，下一条消息时由 ensureHermesSession 按需重建。
    */
   async restartAgent(): Promise<void> {
     if (!this.process) return
-    this.logManager?.info('Restarting Hermes ACP process (permission mode changed to readonly)')
+    this.logManager?.info('Restarting Hermes ACP process (permission mode changed)')
     const proc = this.process
     this.process = null
     this._isRunning = false
@@ -1117,6 +1125,28 @@ display:
       yaml += '    - "*"\n'
     }
     return yaml
+  }
+
+  /**
+   * 按权限模式生成注入系统提示词的"权限须知"。
+   * 与设置页文案（审批模式/完全放开/只读保护）保持一致，
+   * 让 Hermes 在被权限拦截时能向用户解释原因并指导用户调整。
+   */
+  private buildPermissionHint(mode: string): string {
+    const base = '【当前应用的权限模式】'
+    switch (mode) {
+      case 'readonly':
+        return `${base}「只读保护」：你只能读取和查询信息，写文件、执行终端命令等操作会被系统自动拦截。` +
+          '当用户请求这类被拦截的操作时，请用一句话向用户说明：当前处于只读保护模式，' +
+          '如需允许写入/执行，请点击应用右上角"设置"，在"权限模式"中切换为"审批模式"（每次操作弹窗确认）' +
+          '或"完全放开"（直接执行）。不要反复尝试绕过或换方式执行被拦截的操作。'
+      case 'auto':
+        return `${base}「完全放开」：所有操作（包括写文件、执行命令）都会自动允许，无需询问用户。`
+      default:
+        return `${base}「审批模式」：你执行写文件、运行命令等高风险操作前，应用会弹窗征求用户确认。` +
+          '若操作被拒绝，请向用户说明原因，不要重试或换方式绕过；' +
+          '用户如需减少确认，可点击应用右上角"设置"，在"权限模式"中切换。'
+    }
   }
 
   private escapeYaml(value: string): string {

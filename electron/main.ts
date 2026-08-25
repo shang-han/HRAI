@@ -565,9 +565,10 @@ function registerIpcHandlers() {
         cfg.permissionMode || 'ask',
         cfg.selectedModels?.dialogue
       )
-      // 切到只读时重启智能体进程：清掉询问模式下遗留的会话级批准，
-      // 保证只读保护立即完整生效（下一条消息会自动拉起新进程）
-      if (key === 'permissionMode' && value === 'readonly') {
+      // 权限模式变化时重启智能体进程：清掉遗留的会话级批准，
+      // 并让新的 approvals 配置与进程级权限提示词立即完整生效
+      // （下一条消息会自动拉起新进程）
+      if (key === 'permissionMode') {
         hermesManager.restartAgent().catch(() => {})
       }
     }

@@ -19,6 +19,8 @@ const App: React.FC = () => {
   const [online, setOnline] = useState(navigator.onLine)
   // 右侧主区域视图：chat=聊天 / work=近期重点工作页 / templates=预设指令库管理页
   const [mainView, setMainView] = useState<'chat' | 'work' | 'templates'>('chat')
+  // 指令库只读模式：输入框入口只能点选填入；编辑/新建只能从侧边栏入口进入
+  const [templatesReadonly, setTemplatesReadonly] = useState(false)
   const themeMode = useConfigStore(state => state.theme)
   const initSession = useSessionStore(state => state.initSession)
   const loadConfig = useConfigStore(state => state.loadConfig)
@@ -69,9 +71,12 @@ const App: React.FC = () => {
     setMainView('chat')
   }, [activeSessionId])
 
-  // 输入框"模板库"按钮等入口：通过事件打开预设指令库管理页
+  // 输入框"模板库"按钮：只读模式打开（仅点选填入，不可编辑/新建）
   useEffect(() => {
-    const openTemplates = () => setMainView('templates')
+    const openTemplates = () => {
+      setTemplatesReadonly(true)
+      setMainView('templates')
+    }
     window.addEventListener('openTemplates', openTemplates)
     return () => window.removeEventListener('openTemplates', openTemplates)
   }, [])
@@ -154,7 +159,11 @@ const App: React.FC = () => {
         {/* 左侧侧边栏 */}
         <Sidebar
           onOpenWork={() => setMainView('work')}
-          onOpenTemplates={() => setMainView('templates')}
+          onOpenTemplates={() => {
+            // 侧边栏入口：完整管理页（可编辑/新建）
+            setTemplatesReadonly(false)
+            setMainView('templates')
+          }}
         />
 
         {/* 右侧主区域 */}
@@ -162,7 +171,7 @@ const App: React.FC = () => {
           {mainView === 'work' ? (
             <WorkPriorityView onBack={() => setMainView('chat')} />
           ) : mainView === 'templates' ? (
-            <TemplateManagerView onBack={() => setMainView('chat')} />
+            <TemplateManagerView readonly={templatesReadonly} onBack={() => setMainView('chat')} />
           ) : (
             <>
               {/* Hermes 内核状态警告条（仅会话页面顶部，黄色，未运行时显示） */}
