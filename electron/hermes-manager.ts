@@ -220,9 +220,11 @@ export class HermesManager {
     try {
       this.logManager?.info(`Starting Hermes ACP: ${this.pythonPath}`)
 
+      // HERMES_GATEWAY_SESSION=1 让 execute_code（任意 Python）也进入 Hermes 审批门：
+      // 否则 ACP 会话不属于网关上下文，execute_code 会直接放行，只读/询问模式拦不住。
       this.process = spawn(this.pythonPath, ['-m', 'acp_adapter.entry'], {
         cwd: this.hermesPath,
-        env: this.buildIsolatedEnv(),
+        env: { ...this.buildIsolatedEnv(), HERMES_GATEWAY_SESSION: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
       })
@@ -444,7 +446,12 @@ export class HermesManager {
         // 留出短暂时间让 ACP 清理 running 状态，防止紧跟的新消息触发
         // “Redirected the active turn with your correction.”
         await new Promise(resolve => setTimeout(resolve, 1500))
-        handler.onError(err.message)
+        // 用户主动停止/看门狗取消时按"完成"处理，不把 ACP 的 Internal error 漏给用户
+        if (this.stopRequested) {
+          handler.onDone()
+        } else {
+          handler.onError(err.message)
+        }
       } finally {
         this.streamHandler = null
         this.lastPromptSessionId = null
@@ -972,18 +979,41 @@ export class HermesManager {
     }
   }
 
+  /**
+   * 仅重启 ACP 智能体进程（不动渠道网关）。
+   * 切换到只读模式后调用：清除内存中的会话级批准记录（询问模式下
+   * "允许本次会话"残留的放行），并让新 approvals 配置完整生效。
+   * 进程不会自动拉起，下一条消息时由 ensureHermesSession 按需重建。
+   */
+  async restartAgent(): Promise<void> {
+    if (!this.process) return
+    this.logManager?.info('Restarting Hermes ACP process (permission mode changed to readonly)')
+    const proc = this.process
+    this.process = null
+    this._isRunning = false
+    this.activePrompt = null
+    this.stopRequested = false
+    proc.kill('SIGTERM')
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => { proc.kill('SIGKILL'); resolve() }, 5000)
+      proc.on('exit', () => { clearTimeout(t); resolve() })
+    })
+  }
+
   // ============ Hermes 配置管理 ============
 
   /**
    * 写入 Hermes 模型配置到 config.yaml + .env
    * 优先使用默认对话模型（isPrimary），base_url 去掉 /chat/completions 后缀（Hermes 自动拼接）
    * 可选 weixin 配置：当用户开启个人微信渠道时，Hermes 内置网关负责 iLink 长轮询收发。
+   * permissionMode 决定 approvals 块（权限策略），见 buildApprovalsYaml。
+   * selectedDialogueId 是输入框下拉选中的对话模型 id，优先于配置页"默认"（isPrimary）。
    */
   writeHermesConfig(models: {
     type?: string; id: string; apiKey: string; modelName: string;
     apiEndpoint: string; enabled?: boolean; isPrimary?: boolean; provider?: string;
     params?: Record<string, any>
-  }[], weixin?: { enabled: boolean; token?: string; accountId?: string; baseUrl?: string }, wecom?: { enabled: boolean; botId?: string; secret?: string }): void {
+  }[], weixin?: { enabled: boolean; token?: string; accountId?: string; baseUrl?: string }, wecom?: { enabled: boolean; botId?: string; secret?: string }, permissionMode?: string, selectedDialogueId?: string): void {
     // 写入 .env 文件（API Keys）
     const seenKeys = new Set<string>()
     const envLines: string[] = []
@@ -998,8 +1028,11 @@ export class HermesManager {
     }
     fs.writeFileSync(this.envPath, envLines.join('\n') + '\n')
 
-    // 写入 config.yaml（模型选择）
+    // 写入 config.yaml（模型选择）：优先输入框下拉选中的对话模型
+    // （selectedDialogueId），没选过则用配置页"默认"（isPrimary），
+    // 再做兜底。没 Key 时的 401 由主进程友好错误文案负责提示。
     const primaryModel =
+      models.find(m => m.type === 'dialogue' && m.id === selectedDialogueId && m.enabled !== false) ||
       models.find(m => m.type === 'dialogue' && m.isPrimary && m.enabled !== false) ||
       models.find(m => m.type === 'dialogue' && m.enabled !== false) ||
       models.find(m => m.enabled !== false)
@@ -1012,7 +1045,7 @@ export class HermesManager {
       const maxTokens = savedMax > 65536 ? savedMax : 65536
       yaml = `model:
   default: "${this.escapeYaml(primaryModel.modelName)}"
-  provider: "${this.getProviderName(primaryModel.id)}"
+  provider: "${this.getProviderName(primaryModel)}"
   base_url: "${this.stripCompletionsSuffix(primaryModel.apiEndpoint)}"
   max_tokens: ${maxTokens}
 display:
@@ -1052,11 +1085,38 @@ display:
 `
     }
 
+    // 权限策略块：approvals 始终写入（即使没有启用的模型），
+    // config.yaml 是 Hermes 的 mtime 热缓存，写入立即生效、无需重启。
+    yaml += this.buildApprovalsYaml(permissionMode)
+
     if (yaml) {
       fs.writeFileSync(this.configPath, yaml)
     }
 
     this.logManager?.info('Hermes config written')
+  }
+
+  /**
+   * 按权限模式生成 Hermes approvals 块（config.yaml 的权限策略）：
+   * - ask      → mode manual：每条危险命令都走 ACP 桥，由用户弹窗确认
+   *   （避免 smart 模式下辅助 LLM 静默放行的绕过）
+   * - auto     → mode off：全部放行，不打扰
+   * - readonly → mode manual + deny ["*"]：所有终端命令硬线拦截
+   *   （deny 规则在任何 bypass 之前生效，且明确告知模型不要重试；
+   *   write_file/execute_code 则由 ACP 桥按只读模式拒绝）
+   */
+  private buildApprovalsYaml(mode?: string): string {
+    const resolved = mode === 'auto' || mode === 'readonly' ? mode : 'ask'
+    let yaml = 'approvals:\n'
+    yaml += `  mode: "${resolved === 'auto' ? 'off' : 'manual'}"\n`
+    yaml += '  timeout: 300\n'
+    yaml += '  cron_mode: deny\n'
+    yaml += '  single_query_mode: deny\n'
+    if (resolved === 'readonly') {
+      yaml += '  deny:\n'
+      yaml += '    - "*"\n'
+    }
+    return yaml
   }
 
   private escapeYaml(value: string): string {
@@ -1067,28 +1127,37 @@ display:
     return url.replace(/\/chat\/completions\/?$/, '')
   }
 
-  private getEnvKeyName(model: { id: string; provider?: string }): string {
-    const provider = String(model.provider || '').toLowerCase()
+  private getEnvKeyName(model: { id: string; apiEndpoint?: string; provider?: string }): string {
     const byProvider: Record<string, string> = {
       deepseek: 'DEEPSEEK_API_KEY',
       dashscope: 'DASHSCOPE_API_KEY',
-      qwen: 'DASHSCOPE_API_KEY',
       zai: 'GLM_API_KEY',
-      glm: 'GLM_API_KEY',
       openai: 'OPENAI_API_KEY',
       openrouter: 'OPENROUTER_API_KEY',
       kling: 'KLING_API_KEY',
     }
-    if (byProvider[provider]) return byProvider[provider]
-    return byProvider[this.getProviderName(model.id)] || 'OPENAI_API_KEY'
+    // 与 config.yaml 里写的 provider 用同一套判定（端点优先、其次模型 ID），
+    // 保证 .env 里的 Key 变量名和 Hermes 实际读取的一致
+    return byProvider[this.getProviderName(model)] || 'OPENAI_API_KEY'
   }
 
-  private getProviderName(modelId: string): string {
-    if (modelId.startsWith('deepseek')) return 'deepseek'
-    if (modelId.startsWith('qwen') || modelId.startsWith('wanx')) return 'dashscope'
-    if (modelId.startsWith('glm')) return 'zai'
-    if (modelId.startsWith('kling')) return 'kling'
-    if (modelId.startsWith('dall-e')) return 'openai'
+  private getProviderName(model: { id: string; apiEndpoint?: string }): string {
+    const id = String(model.id || '').toLowerCase()
+    const endpoint = String(model.apiEndpoint || '').toLowerCase()
+
+    // 端点优先：从 API 地址直接判断服务商（模型从 API 拉取/自定义时 id 不可靠）
+    if (endpoint.includes('openrouter')) return 'openrouter'
+    if (endpoint.includes('deepseek.com')) return 'deepseek'
+    if (endpoint.includes('dashscope') || endpoint.includes('aliyuncs')) return 'dashscope'
+    if (endpoint.includes('bigmodel')) return 'zai'
+    if (endpoint.includes('klingai')) return 'kling'
+    if (endpoint.includes('openai.com')) return 'openai'
+
+    if (id.startsWith('deepseek')) return 'deepseek'
+    if (id.startsWith('qwen') || id.startsWith('wanx')) return 'dashscope'
+    if (id.startsWith('glm')) return 'zai'
+    if (id.startsWith('kling')) return 'kling'
+    if (id.startsWith('dall-e')) return 'openai'
     return 'openrouter'
   }
 

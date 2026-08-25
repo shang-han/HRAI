@@ -238,7 +238,8 @@ export class StorageManager {
           modelName,
           apiEndpoint,
           apiKey: p.apiKey || '',
-          enabled: p.enabled !== false,
+          // 所有类型统一：没有 API Key 的不允许保持启用
+          enabled: p.enabled !== false && !!(p.apiKey || '').trim(),
           isPrimary: p.isPrimary,
           params,
           provider: isCustom ? '自定义' : (p.provider || fallbackForId?.provider || '')
@@ -591,7 +592,7 @@ export class StorageManager {
             apiKey: '',
             modelName: 'deepseek-chat',
             params: { temperature: 0.7, max_tokens: 65536 },
-            enabled: true,
+            enabled: false,
             isPrimary: true
           },
           {
@@ -614,7 +615,7 @@ export class StorageManager {
             apiKey: '',
             modelName: 'wanx-v1',
             params: { size: '1024*1024', n: 1 },
-            enabled: true
+            enabled: false
           }
         ],
         video: [
@@ -638,7 +639,7 @@ export class StorageManager {
             apiKey: '',
             modelName: 'qwen-vl-max',
             params: { temperature: 0.7, max_tokens: 65536 },
-            enabled: true
+            enabled: false
           }
         ]
       },

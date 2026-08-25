@@ -21,6 +21,8 @@ interface ConfigState {
     video: ModelProvider[]
     multimodal: ModelProvider[]
   }
+  /** 输入框下拉的选择（每类一个模型 id），独立于配置页"默认"（isPrimary） */
+  selectedModels: Partial<Record<'dialogue' | 'image' | 'video' | 'multimodal', string>>
   shortcuts: Record<string, string>
   layout: {
     sidebarCollapsed: boolean
@@ -31,6 +33,7 @@ interface ConfigState {
   // Actions
   setTheme: (theme: 'light' | 'dark') => void
   setModelConfig: (type: string, providers: ModelProvider[]) => void
+  setSelectedModel: (type: string, id: string) => void
   setShortcut: (key: string, value: string) => void
   toggleSidebar: () => void
   setInputMode: (mode: 'single' | 'multi') => void
@@ -67,6 +70,7 @@ const defaultModelConfig = {
 export const useConfigStore = create<ConfigState>((set, get) => ({
   theme: 'light',
   modelConfig: defaultModelConfig,
+  selectedModels: {},
   shortcuts: {},
   layout: {
     sidebarCollapsed: false,
@@ -84,6 +88,13 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const newConfig = { ...config, [type]: providers }
     set({ modelConfig: newConfig })
     await window.electronAPI.config.set('modelConfig', newConfig)
+  },
+
+  // 输入框选择模型：只更新 selectedModels，不回写模型配置的"默认"（isPrimary）
+  setSelectedModel: async (type, id) => {
+    const selectedModels = { ...get().selectedModels, [type]: id }
+    set({ selectedModels })
+    await window.electronAPI.config.set('selectedModels', selectedModels)
   },
 
   setShortcut: async (key, value) => {
@@ -109,6 +120,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       set({
         theme: config.theme || 'light',
         modelConfig: config.modelConfig || get().modelConfig,
+        selectedModels: config.selectedModels || {},
         shortcuts: config.shortcuts || {},
         layout: config.layout || get().layout,
         loaded: true

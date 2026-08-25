@@ -107,6 +107,20 @@ async function runTurn(
     // 调用模型（流式）：intent 在主进程被路由并装配为 skill/工作流指令
     const result = await window.electronAPI.chat.stream(content, sessionId, undefined, images, intent)
 
+    // 即时错误（如未配置模型）由返回值带回：事件通道在订阅前发出的会丢
+    if (result && (result as any).error) {
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `⚠️ ${(result as any).error}`,
+        timestamp: new Date().toISOString()
+      }
+      await window.electronAPI.session.saveMessage(sessionId, assistantMessage)
+      set({ messages: [...get().messages, assistantMessage], isLoading: false })
+      await drainNext(set, get)
+      return
+    }
+
     watchdog = setTimeout(() => {
       const s = get()
       if (s.isLoading || s.isStopping) {

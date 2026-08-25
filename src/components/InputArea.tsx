@@ -44,33 +44,47 @@ const InputArea: React.FC = () => {
   const [commands, setCommands] = useState<any[]>(FALLBACK_COMMANDS)
   const [commandIndex, setCommandIndex] = useState(0)
   const { sendMessage, isLoading, pendingMessages, activeSessionId } = useSessionStore()
-  const { modelConfig, setModelConfig } = useConfigStore()
+  const { modelConfig, selectedModels, setSelectedModel } = useConfigStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // 输入框内模型选择（二级菜单）：一级选模态，二级选已配置模型，选中即设为该模态默认
+  // 输入框内模型选择（二级菜单）：一级选模态，二级选已配置模型；选择只影响输入框自身与路由偏好，不改配置页"默认"
   const MODALITY_LABELS: Record<string, string> = {
     dialogue: '对话',
     image: '图片',
     video: '视频',
     multimodal: '多模态'
   }
-  const [currentModel, setCurrentModel] = useState<{ type: string; name: string; modelName: string } | null>(() => {
-    const primary =
-      modelConfig.dialogue.find((m: any) => m.enabled && m.isPrimary) ||
-      modelConfig.dialogue.find((m: any) => m.enabled)
-    return primary
-      ? {
-          type: 'dialogue',
-          name: primary.name || primary.modelName,
-          modelName: primary.modelName || primary.name
-        }
-      : null
-  })
+  const [currentModel, setCurrentModel] = useState<{ type: string; name: string; modelName: string } | null>(null)
+
+  // 文本聊天使用的模型 = 输入框选中的对话模型，没选过就用配置页"默认"（不做自动查找/回退）
+  const selectedDialogue =
+    modelConfig.dialogue.find((m: any) => m.id === selectedModels.dialogue && m.enabled !== false) ||
+    modelConfig.dialogue.find((m: any) => m.isPrimary && m.enabled !== false) ||
+    null
+
+  // 选中状态变化时按钮与勾选实时跟随
+  useEffect(() => {
+    if (!selectedDialogue) {
+      setCurrentModel(null)
+      return
+    }
+    setCurrentModel(prev => {
+      // 手动选了图片/视频等模型时保持显示；对话模型显示始终跟随选中项
+      if (prev && prev.type !== 'dialogue') return prev
+      const modelName = selectedDialogue.modelName || selectedDialogue.name
+      if (prev && prev.modelName === modelName) return prev
+      return {
+        type: 'dialogue',
+        name: selectedDialogue.name || modelName,
+        modelName
+      }
+    })
+  }, [modelConfig, selectedModels])
 
   const handleModelChange = (type: string, id: string, name: string, modelName: string) => {
-    const updated = (modelConfig as any)[type].map((m: any) => ({ ...m, isPrimary: m.id === id }))
-    setModelConfig(type, updated)
+    // 只记录输入框自己的选择，不动模型配置里的"默认"
+    setSelectedModel(type, id)
     setCurrentModel({ type, name, modelName })
   }
 
@@ -89,7 +103,12 @@ const InputArea: React.FC = () => {
                 <span className="text-inkMuted text-[10px]">
                   {m.provider || (m.name || '').split(' · ')[0]}
                 </span>
-                {m.isPrimary && <CheckOutlined className="text-primary text-xs" />}
+                {/* 勾选 = 该模态下输入框选中的模型（对话与按钮显示一致） */}
+                {(type === 'dialogue'
+                  ? selectedDialogue?.id === m.id
+                  : selectedModels[type as keyof typeof selectedModels] === m.id) && (
+                  <CheckOutlined className="text-primary text-xs" />
+                )}
               </span>
             ),
             onClick: () => handleModelChange(type, m.id, m.name || m.modelName, m.modelName || m.name)

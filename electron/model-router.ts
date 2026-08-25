@@ -1,6 +1,7 @@
 import https from 'https'
 import http from 'http'
 import zlib from 'zlib'
+import crypto from 'crypto'
 import { StorageManager } from './storage-manager'
 
 interface ModelProvider {
@@ -21,6 +22,48 @@ interface ChatMessage {
 }
 
 // 任务类型关键词映射
+/** API Key 清洗：去除所有空白字符（换行/空格/全角空格等），避免请求头报错 */
+function cleanKey(key: string): string {
+  return String(key || '').replace(/\s+/g, '')
+}
+
+/** 可灵官方鉴权：AccessKey|SecretKey 生成 JWT（HS256） */
+function klingJwt(accessKey: string, secretKey: string): string {
+  const header = { alg: 'HS256', typ: 'JWT' }
+  const now = Math.floor(Date.now() / 1000)
+  const payload = { iss: accessKey, exp: now + 1800, nbf: now - 5 }
+  const b64 = (o: any) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const sign = crypto
+    .createHmac('sha256', secretKey)
+    .update(`${b64(header)}.${b64(payload)}`)
+    .digest('base64url')
+  return `${b64(header)}.${b64(payload)}.${sign}`
+}
+
+/** 把上游 API 的英文错误翻译成用户能看懂的中文 */
+function friendlyApiError(message: string): string {
+  const m = String(message || '').toLowerCase()
+  if (m.includes('invalid character in header')) {
+    return 'API Key 包含非法字符（空格/换行等），请重新粘贴纯 Key 内容'
+  }
+  if (m.includes('incorrect api key') || m.includes('invalid api key') || m.includes('unauthorized') || (m.includes('401') && m.includes('key'))) {
+    return 'API Key 无效或未授权：请检查"模型接入配置"中填写的 API Key 是否正确'
+  }
+  if (m.includes('401')) {
+    return '请求未授权（401）：请检查 API Key 是否填写正确'
+  }
+  if (m.includes('insufficient') || m.includes('quota') || m.includes('balance') || m.includes('402')) {
+    return '账户余额不足或配额用尽：请检查服务商账户的余额/额度'
+  }
+  if (m.includes('429') || m.includes('rate limit')) {
+    return '请求过于频繁（429）：请稍后重试'
+  }
+  if (m.includes('404') && (m.includes('model') || m.includes('not found'))) {
+    return '模型或接口地址不存在（404）：请检查模型名称和 API 端点'
+  }
+  return message
+}
+
 const TASK_KEYWORDS: Record<string, string[]> = {
   // 注意：只匹配"生成意图"的措辞，避免"写个视频脚本"这类文本任务被误路由
   image: ['生成图片', '生成一张图', '画一张', '画个', '画一幅', '生成海报', '设计海报', '生成流程图', '生成架构图', '生成示意图', '生成插图'],
@@ -47,11 +90,14 @@ export class ModelRouter {
   }
 
   /**
-   * 获取当前对话模型：优先 isPrimary，其次第一个启用的
+   * 获取当前对话模型：优先输入框选择（selectedModels.dialogue），
+   * 其次配置页"默认"（isPrimary），最后第一个启用的
    */
   getDefaultDialogueModel(config: any): ModelProvider | null {
     const providers: ModelProvider[] = config?.modelConfig?.dialogue || []
+    const selId = config?.selectedModels?.dialogue
     return (
+      providers.find(p => p.enabled && p.id === selId) ||
       providers.find(p => p.enabled && p.isPrimary) ||
       providers.find(p => p.enabled) ||
       null
@@ -74,7 +120,7 @@ export class ModelRouter {
       const elapsed = Date.now() - start
       return { success: true, message: `连接成功（${elapsed}ms）` }
     } catch (err: any) {
-      return { success: false, message: err.message }
+      return { success: false, message: friendlyApiError(err.message) }
     }
   }
 
@@ -116,7 +162,7 @@ export class ModelRouter {
       }
       return { success: true, models: unique }
     } catch (err: any) {
-      return { success: false, message: err.message || '获取模型列表失败' }
+      return { success: false, message: friendlyApiError(err.message || '获取模型列表失败') }
     }
   }
 
@@ -125,7 +171,7 @@ export class ModelRouter {
       const client = url.startsWith('https:') ? https : http
       const req = client.get(url, {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${cleanKey(apiKey)}`,
           Accept: 'application/json'
         }
       }, (res) => {
@@ -199,13 +245,28 @@ export class ModelRouter {
         providers = modelConfig.dialogue
     }
 
-    // 返回第一个启用的模型
-    return providers.find(p => p.enabled) || providers[0] || null
+    // 返回实际使用的模型：输入框选择 → 默认 → 第一个启用
+    const selId = (config as any)?.selectedModels?.[taskType]
+    return (
+      providers.find(p => p.enabled && p.id === selId) ||
+      providers.find(p => p.enabled && p.isPrimary) ||
+      providers.find(p => p.enabled) ||
+      providers[0] ||
+      null
+    )
   }
 
   getMultimodalModel(): ModelProvider | null {
-    const providers = this.storageManager.getConfig()?.modelConfig?.multimodal || []
-    return providers.find(p => p.enabled) || providers[0] || null
+    const cfg: any = this.storageManager.getConfig() || {}
+    const providers = cfg.modelConfig?.multimodal || []
+    const selId = cfg.selectedModels?.multimodal
+    return (
+      providers.find(p => p.enabled && p.id === selId) ||
+      providers.find(p => p.enabled && p.isPrimary) ||
+      providers.find(p => p.enabled) ||
+      providers[0] ||
+      null
+    )
   }
 
   /**
@@ -221,12 +282,19 @@ export class ModelRouter {
   }
 
   /**
-   * 返回该类型下"被选中（isPrimary）且已启用"的模型，否则退回第一个已启用的；
-   * 与对话模型语义一致：输入框下拉选中的模型就是实际使用的模型。
+   * 返回该类型下实际使用的模型，优先级：
+   * 输入框选择（selectedModels[type]）→ 配置页"默认"（isPrimary）→ 第一个已启用。
    */
   getFirstEnabled(type: 'image' | 'video' | 'multimodal'): ModelProvider | null {
-    const list = this.storageManager.getConfig()?.modelConfig?.[type] || []
-    return list.find(p => p.enabled && p.isPrimary) || list.find(p => p.enabled) || null
+    const cfg: any = this.storageManager.getConfig() || {}
+    const list = cfg.modelConfig?.[type] || []
+    const selId = cfg.selectedModels?.[type]
+    return (
+      list.find(p => p.enabled && p.id === selId) ||
+      list.find(p => p.enabled && p.isPrimary) ||
+      list.find(p => p.enabled) ||
+      null
+    )
   }
 
   /**
@@ -244,6 +312,10 @@ export class ModelRouter {
     try {
       if (model.type === 'image') {
         return await this.callImageModel(model, message)
+      }
+
+      if (model.type === 'video') {
+        return await this.callVideoModel(model, message)
       }
 
       // 构建消息
@@ -273,6 +345,123 @@ export class ModelRouter {
     } catch (err: any) {
       return { success: false, error: `模型调用失败: ${err.message}` }
     }
+  }
+
+  /**
+   * 可灵文生视频：提交任务 -> 轮询结果 -> 返回视频地址。
+   * 鉴权：apiKey 填 "AccessKey|SecretKey" 时生成 JWT，否则按 Bearer Key 直连（代理服务）。
+   * 动态解析：提示词里的"N秒"映射到支持时长（5/10），"16:9"等映射画幅。
+   */
+  private async callVideoModel(model: ModelProvider, prompt: string): Promise<{ success: boolean; content?: string; error?: string }> {
+    try {
+      // 目前仅实现可灵原生接口，其他厂商格式各异无法通用推断
+      const endpoint = String(model.apiEndpoint || '').toLowerCase()
+      if (!endpoint.includes('klingai')) {
+        return { success: false, error: '该视频接口暂不支持（目前仅支持可灵 Kling，请使用可灵端点）' }
+      }
+
+      const key = cleanKey(model.apiKey)
+      const auth = key.includes('|') ? klingJwt(...key.split('|') as [string, string]) : key
+
+      // 时长：提示词"N秒"优先，映射到可灵支持的 5/10 秒
+      const durMatch = prompt.match(/(\d{1,2})\s*秒/)
+      let duration = model.params?.duration ? String(model.params.duration) : '5'
+      if (durMatch) {
+        const n = Number(durMatch[1])
+        duration = String(Math.abs(n - 5) <= Math.abs(n - 10) ? 5 : 10)
+      }
+
+      // 画幅：提示词"16:9"优先
+      const arMatch = prompt.match(/(\d+\s*:\s*\d+)/)
+      const aspectRatio = arMatch
+        ? arMatch[1].replace(/\s+/g, '')
+        : (model.params?.aspect_ratio || undefined)
+
+      const url = new URL(model.apiEndpoint)
+      const body = JSON.stringify({
+        model_name: model.modelName,
+        prompt,
+        duration,
+        mode: 'std',
+        ...(aspectRatio ? { aspect_ratio: aspectRatio } : {})
+      })
+
+      const submit = await this.httpPostJsonAuth(url, body, auth, 60000)
+      const taskId = submit?.data?.task_id
+      if (!taskId) {
+        return { success: false, error: friendlyApiError(submit?.message || '视频生成任务提交失败') }
+      }
+
+      // 轮询任务状态（3 秒一次，最多约 2 分钟）
+      const queryUrl = url.toString().replace(/\/text2video$/, '') + '/' + taskId
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 3000))
+        const status = await this.httpGetJsonAuth(queryUrl, auth)
+        const st = status?.data?.task_status
+        if (st === 'succeed') {
+          const videoUrl = status?.data?.task_result?.videos?.[0]?.url
+          if (!videoUrl) return { success: false, error: '视频生成完成但未返回地址' }
+          return { success: true, content: `视频已生成:\n${videoUrl}` }
+        }
+        if (st === 'failed') {
+          return { success: false, error: friendlyApiError(status?.data?.task_status_msg || '视频生成失败') }
+        }
+      }
+      return { success: false, error: '视频生成超时，请稍后重试' }
+    } catch (err: any) {
+      return { success: false, error: `视频模型调用失败: ${err.message}` }
+    }
+  }
+
+  /** GET 请求（Bearer 鉴权，返回解析后的 JSON） */
+  private httpGetJsonAuth(url: string, bearer: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const client = url.startsWith('https:') ? https : http
+      const req = client.get(url, {
+        headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' }
+      }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c: Buffer) => chunks.push(c))
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
+          } catch {
+            reject(new Error('响应解析失败'))
+          }
+        })
+      })
+      req.setTimeout(20000, () => req.destroy(new Error('请求超时')))
+      req.on('error', reject)
+    })
+  }
+
+  /** POST 请求（Bearer 鉴权，返回解析后的 JSON） */
+  private httpPostJsonAuth(url: URL, body: string, bearer: string, timeoutMs: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const client = url.protocol === 'https:' ? https : http
+      const req = client.request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${bearer}`,
+          'Content-Length': Buffer.byteLength(body)
+        },
+        timeout: timeoutMs
+      }, (res) => {
+        let data = ''
+        res.on('data', c => data += c)
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data))
+          } catch {
+            reject(new Error('响应解析失败'))
+          }
+        })
+      })
+      req.on('error', reject)
+      req.write(body)
+      req.end()
+    })
   }
 
   /**
@@ -342,7 +531,7 @@ export class ModelRouter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${model.apiKey}`,
+          'Authorization': `Bearer ${cleanKey(model.apiKey)}`,
           'Accept-Encoding': 'gzip, deflate, br',
           'Content-Length': Buffer.byteLength(body)
         },
@@ -460,7 +649,7 @@ export class ModelRouter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${model.apiKey}`,
+          'Authorization': `Bearer ${cleanKey(model.apiKey)}`,
           'Accept-Encoding': 'gzip, deflate, br',
           'Content-Length': Buffer.byteLength(body)
         },
@@ -564,10 +753,39 @@ export class ModelRouter {
   private async callImageModel(model: ModelProvider, prompt: string): Promise<{ success: boolean; content?: string; error?: string }> {
     try {
       const url = new URL(model.apiEndpoint)
+      const endpoint = String(model.apiEndpoint || '').toLowerCase()
+
+      // 动态尺寸：提示词里写了"1280x720 / 1024*1024"等时，覆盖默认 size 参数
+      const sizeMatch = prompt.match(/(\d{2,4})\s*[x×*]\s*(\d{2,4})/i)
+
+      // 接口格式按端点自动推断：OpenAI Images API
+      if (endpoint.includes('openai.com')) {
+        const size = sizeMatch
+          ? `${sizeMatch[1]}x${sizeMatch[2]}`
+          : String((model.params as any)?.size || '1024x1024').replace(/\*/g, 'x')
+        const body = JSON.stringify({
+          model: model.modelName,
+          prompt,
+          n: (model.params as any)?.n || 1,
+          size
+        })
+        const resp = await this.httpPostJsonAuth(url, body, cleanKey(model.apiKey), 60000)
+        const imgUrl = resp?.data?.[0]?.url
+        if (!imgUrl) {
+          return { success: false, error: friendlyApiError(resp?.error?.message || resp?.message || '图片生成失败') }
+        }
+        return { success: true, content: `图片已生成:\n${imgUrl}` }
+      }
+
+      // 通义万相原生格式（默认）
+      const parameters = sizeMatch
+        ? { ...(model.params || {}), size: `${sizeMatch[1]}*${sizeMatch[2]}` }
+        : model.params
+
       const body = JSON.stringify({
         model: model.modelName,
         input: { prompt },
-        parameters: model.params
+        parameters
       })
 
       const response = await new Promise<any>((resolve, reject) => {
@@ -576,7 +794,7 @@ export class ModelRouter {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${model.apiKey}`,
+            'Authorization': `Bearer ${cleanKey(model.apiKey)}`,
             'X-DashScope-Async': 'enable',
             'Content-Length': Buffer.byteLength(body)
           },

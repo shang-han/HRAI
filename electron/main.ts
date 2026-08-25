@@ -36,10 +36,23 @@ const hermesSessions = new Map<string, string>()
 // ACP 审批请求 -> Promise resolve
 const pendingApprovals = new Map<number, (allow: boolean) => void>()
 
-/** 是否已有"启用且填写了 API Key"的对话模型（聊天可用性的前置条件） */
-function hasUsableDialogueModel(): boolean {
-  const list = storageManager?.getConfig()?.modelConfig?.dialogue || []
-  return list.some((p: any) => p.enabled && p.apiKey && p.apiKey.trim())
+/**
+ * 聊天前置检查：返回"为什么不能用"的说明，null 表示可以发送。
+ * 语义：优先用输入框下拉选中的模型，没选过用配置页"默认"，不做自动回退。
+ */
+function dialogueModelIssue(): string | null {
+  const cfg: any = storageManager?.getConfig() || {}
+  const list = cfg.modelConfig?.dialogue || []
+  const selected =
+    list.find((p: any) => p.id === cfg.selectedModels?.dialogue && p.enabled !== false) ||
+    list.find((p: any) => p.isPrimary && p.enabled !== false)
+  if (!selected) {
+    return '尚未选择对话模型：请在输入框的模型下拉中选择一个模型'
+  }
+  if (!(selected.apiKey && selected.apiKey.trim())) {
+    return `所选模型「${selected.name}」未填写 API Key，请在"模型接入配置"中补充`
+  }
+  return null
 }
 
 /** 把底层模型错误翻译成人话（避免裸 401 透传给用户） */
@@ -47,6 +60,9 @@ function friendlyModelError(error: string): string {
   const e = String(error || '').toLowerCase()
   if (e.includes('401') || e.includes('authentication')) {
     return '模型认证失败（401）：请打开"模型接入配置"，启用对话模型并填写正确的 API Key'
+  }
+  if (e.includes('internal error')) {
+    return '任务执行出错，请重试（若长时间未响应可先点"停止"）'
   }
   return error
 }
@@ -221,28 +237,42 @@ function syncHermesConfig() {
       allModels.push(...models)
     }
   }
-  hermesManager.writeHermesConfig(allModels)
+  hermesManager.writeHermesConfig(
+    allModels,
+    undefined,
+    undefined,
+    (storageManager.getConfig() as any)?.permissionMode || 'ask',
+    (storageManager.getConfig() as any)?.selectedModels?.dialogue
+  )
 }
 
 /**
- * 确保 Hermes 已启动并为该渲染端会话创建 ACP 会话
- * 失败返回 null（调用方降级为直连模式）
+ * 确保 Hermes 已启动并为该渲染端会话创建 ACP 会话。
+ * 失败时返回可展示的准确原因（区分"内核没起来"与"会话创建超时"），
+ * 不再统一误报"智能体未运行"。
  */
-async function ensureHermesSession(sessionId: string): Promise<string | null> {
+async function ensureHermesSession(sessionId: string): Promise<{ sessionId: string } | { error: string }> {
   try {
     if (!hermesManager.isRunning) {
       syncHermesConfig()
       await hermesManager.start()
+      if (!hermesManager.isRunning) {
+        return { error: 'Hermes 智能体未运行（Python 内核启动失败），请检查日志后重试' }
+      }
     }
     let hermesSessionId = hermesSessions.get(sessionId)
     if (!hermesSessionId) {
       hermesSessionId = await hermesManager.createSession()
       hermesSessions.set(sessionId, hermesSessionId)
     }
-    return hermesSessionId
+    return { sessionId: hermesSessionId }
   } catch (err: any) {
-    logManager?.warn(`Hermes 会话创建失败（降级直连）: ${err.message}`)
-    return null
+    const msg = String(err?.message || err || '')
+    logManager?.warn(`Hermes 会话创建失败: ${msg}`)
+    if (msg.toLowerCase().includes('timeout') || msg.includes('超时')) {
+      return { error: '智能体正忙（会话创建超时），请稍等几秒后重试' }
+    }
+    return { error: `Hermes 会话创建失败：${msg}` }
   }
 }
 
@@ -324,12 +354,12 @@ function registerIpcHandlers() {
         message,
         storageManager.getConfig(),
         (text: string) => send({ type: 'chunk', data: text }),
-        (error: string) => send({ type: 'error', data: error }),
+        (error: string) => send({ type: 'error', data: friendlyModelError(error) }),
         () => send({ type: 'done' }),
         channel,
         images
       ).catch((err: any) => {
-        send({ type: 'error', data: err.message || '多模态模型调用失败' })
+        send({ type: 'error', data: friendlyModelError(err.message || '多模态模型调用失败') })
       })
       return { channel }
     }
@@ -352,48 +382,37 @@ function registerIpcHandlers() {
         const label = taskType === 'image' ? '图片' : '视频'
         const error = `未启用${label}模型，请先在"模型接入配置"中启用并配置对应模型`
         intentRouter.recordEnd(prepared.taskId, 'error', error)
-        send({ type: 'error', data: error })
-        return { channel }
+        // 即时错误走返回值带回（事件通道存在订阅竞态，会丢）
+        return { channel, error }
       }
-      modelRouter.callModelStream(
-        taskModel,
-        message,
-        storageManager.getConfig(),
-        (text: string) => send({ type: 'chunk', data: text }),
-        (error: string) => {
-          intentRouter.recordEnd(prepared.taskId, 'error', error)
-          send({ type: 'error', data: error })
-        },
-        () => {
-          intentRouter.recordEnd(prepared.taskId, 'done')
-          send({ type: 'done' })
-        },
-        channel
-      ).catch((err: any) => {
-        intentRouter.recordEnd(prepared.taskId, 'error', err.message)
-        send({ type: 'error', data: err.message })
-      })
+      // 图片/视频为异步生成类接口：用非流式调用，完成后一次性回传结果
+      const result = await modelRouter.callModel(taskModel, message, storageManager.getConfig())
+      if (result.success) {
+        intentRouter.recordEnd(prepared.taskId, 'done')
+        send({ type: 'chunk', data: result.content || '' })
+        send({ type: 'done' })
+      } else {
+        intentRouter.recordEnd(prepared.taskId, 'error', result.error)
+        send({ type: 'error', data: friendlyModelError(result.error || '模型调用失败') })
+      }
       return { channel }
     }
 
-    // 发送前检查：没有任何"启用且填了 Key"的对话模型时直接明确提示，
-    // 避免 Hermes 用空配置调用模型后透传裸 401
-    if (!hasUsableDialogueModel()) {
-      const error = '未启用对话模型：请打开"模型接入配置"，启用对话模型并填写 API Key'
-      intentRouter.recordEnd(prepared.taskId, 'error', error)
-      send({ type: 'error', data: error })
-      return { channel }
+    // 发送前检查：用输入框中选中的模型，未选择/没 Key 时明确提示
+    const modelIssue = dialogueModelIssue()
+    if (modelIssue) {
+      intentRouter.recordEnd(prepared.taskId, 'error', modelIssue)
+      // 即时错误走返回值带回（事件通道存在订阅竞态，会丢）
+      return { channel, error: modelIssue }
     }
 
-    const hermesSessionId = await ensureHermesSession(sessionId)
-    if (!hermesSessionId) {
-      const error = 'Hermes 智能体未运行，请检查日志后重试（模型配置 → 日志）'
-      intentRouter.recordEnd(prepared.taskId, 'error', error)
-      send({ type: 'error', data: error })
-      return { channel }
+    const sessionResult = await ensureHermesSession(sessionId)
+    if ('error' in sessionResult) {
+      intentRouter.recordEnd(prepared.taskId, 'error', sessionResult.error)
+      return { channel, error: sessionResult.error }
     }
 
-    hermesManager.sendPrompt(prepared.prompt, hermesSessionId, {
+    hermesManager.sendPrompt(prepared.prompt, sessionResult.sessionId, {
       onText: (text: string) => send({ type: 'chunk', data: text }),
       onThinking: (text: string) => send({ type: 'thinking', data: text }),
       onDone: () => {
@@ -423,7 +442,7 @@ function registerIpcHandlers() {
       const result = await modelRouter.callModel(multimodalModel, message, storageManager.getConfig(), images)
       return result.success
         ? { success: true, content: result.content }
-        : { success: false, error: result.error }
+        : { success: false, error: friendlyModelError(result.error || '多模态模型调用失败') }
     }
 
     const prepared = intentRouter.prepare(message, intentMeta, sessionId)
@@ -448,21 +467,20 @@ function registerIpcHandlers() {
       intentRouter.recordEnd(prepared.taskId, result.success ? 'done' : 'error', result.error)
       return result.success
         ? { success: true, content: result.content }
-        : { success: false, error: result.error }
+        : { success: false, error: friendlyModelError(result.error || '模型调用失败') }
     }
 
-    // 发送前检查（与流式一致）：没有可用对话模型时明确提示
-    if (!hasUsableDialogueModel()) {
-      const error = '未启用对话模型：请打开"模型接入配置"，启用对话模型并填写 API Key'
-      intentRouter.recordEnd(prepared.taskId, 'error', error)
-      return { success: false, error }
+    // 发送前检查（与流式一致）：未选择/没 Key 时明确提示
+    const modelIssue = dialogueModelIssue()
+    if (modelIssue) {
+      intentRouter.recordEnd(prepared.taskId, 'error', modelIssue)
+      return { success: false, error: modelIssue }
     }
 
-    const hermesSessionId = await ensureHermesSession(sessionId)
-    if (!hermesSessionId) {
-      const error = 'Hermes 智能体未运行，请检查日志后重试（模型配置 → 日志）'
-      intentRouter.recordEnd(prepared.taskId, 'error', error)
-      return { success: false, error }
+    const sessionResult = await ensureHermesSession(sessionId)
+    if ('error' in sessionResult) {
+      intentRouter.recordEnd(prepared.taskId, 'error', sessionResult.error)
+      return { success: false, error: sessionResult.error }
     }
 
     return new Promise((resolve) => {
@@ -495,11 +513,11 @@ function registerIpcHandlers() {
   // 发送斜杠命令（/stop、/new、/help 等），不打断当前流式回复
   ipcMain.handle('chat:command', async (_event, command: string, sessionId: string) => {
     try {
-      const hermesSessionId = await ensureHermesSession(sessionId)
-      if (!hermesSessionId) {
-        return { success: false, error: 'Hermes 会话不可用' }
+      const sessionResult = await ensureHermesSession(sessionId)
+      if ('error' in sessionResult) {
+        return { success: false, error: sessionResult.error }
       }
-      await hermesManager.sendCommand(command, hermesSessionId)
+      await hermesManager.sendCommand(command, sessionResult.sessionId)
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -529,17 +547,31 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('config:set', async (_event, key: string, value: any) => {
-    // 如果是模型配置，同时写入 Hermes 配置
-    if (key === 'modelConfig') {
+    const result = storageManager.setConfig(key, value)
+    // 模型配置、输入框选择或权限模式变化时，同步重写 Hermes config.yaml
+    // （approvals 块随权限模式变化，热缓存保存即生效）
+    if (key === 'modelConfig' || key === 'selectedModels' || key === 'permissionMode') {
+      const cfg: any = storageManager.getConfig() || {}
       const allModels: any[] = []
       for (const type of ['dialogue', 'image', 'video', 'multimodal']) {
-        if (Array.isArray((value as any)[type])) {
-          allModels.push(...(value as any)[type])
+        if (Array.isArray(cfg.modelConfig?.[type])) {
+          allModels.push(...cfg.modelConfig[type])
         }
       }
-      hermesManager.writeHermesConfig(allModels)
+      hermesManager.writeHermesConfig(
+        allModels,
+        undefined,
+        undefined,
+        cfg.permissionMode || 'ask',
+        cfg.selectedModels?.dialogue
+      )
+      // 切到只读时重启智能体进程：清掉询问模式下遗留的会话级批准，
+      // 保证只读保护立即完整生效（下一条消息会自动拉起新进程）
+      if (key === 'permissionMode' && value === 'readonly') {
+        hermesManager.restartAgent().catch(() => {})
+      }
     }
-    return storageManager.setConfig(key, value)
+    return result
   })
 
   // ============ 模板模块 ============

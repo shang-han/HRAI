@@ -16,8 +16,7 @@ import {
   PlusOutlined,
   DeleteOutlined,
   CheckCircleFilled,
-  CloseCircleFilled,
-  StarFilled
+  CloseCircleFilled
 } from '@ant-design/icons'
 
 type ModelType = 'dialogue' | 'image' | 'video' | 'multimodal'
@@ -231,6 +230,7 @@ const TopBar: React.FC = () => {
         open={modelConfigOpen}
         onClose={() => setModelConfigOpen(false)}
         width={720}
+        destroyOnClose
         footer={
           <Button
             type="primary"
@@ -245,10 +245,10 @@ const TopBar: React.FC = () => {
           activeKey={modelTabKey}
           onChange={setModelTabKey}
           items={[
-            { key: 'dialogue', label: '对话模型', children: <ModelConfigSection type="dialogue" providers={modelConfig.dialogue} onSave={(p) => { setModelConfig('dialogue', p); setModelConfigOpen(false) }} /> },
-            { key: 'image', label: '图片模型', children: <ModelConfigSection type="image" providers={modelConfig.image} onSave={(p) => { setModelConfig('image', p); setModelConfigOpen(false) }} /> },
-            { key: 'video', label: '视频模型', children: <ModelConfigSection type="video" providers={modelConfig.video} onSave={(p) => { setModelConfig('video', p); setModelConfigOpen(false) }} /> },
-            { key: 'multimodal', label: '多模态模型', children: <ModelConfigSection type="multimodal" providers={modelConfig.multimodal} onSave={(p) => { setModelConfig('multimodal', p); setModelConfigOpen(false) }} /> },
+            { key: 'dialogue', label: '对话模型', children: <ModelConfigSection type="dialogue" providers={modelConfig.dialogue} onSave={(p) => { setModelConfig('dialogue', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
+            { key: 'image', label: '图片模型', children: <ModelConfigSection type="image" providers={modelConfig.image} onSave={(p) => { setModelConfig('image', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
+            { key: 'video', label: '视频模型', children: <ModelConfigSection type="video" providers={modelConfig.video} onSave={(p) => { setModelConfig('video', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
+            { key: 'multimodal', label: '多模态模型', children: <ModelConfigSection type="multimodal" providers={modelConfig.multimodal} onSave={(p) => { setModelConfig('multimodal', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
           ]}
         />
       </Drawer>
@@ -256,10 +256,10 @@ const TopBar: React.FC = () => {
       {/* 渠道接入抽屉 */}
       <Drawer title="渠道接入设置" open={channelConfigOpen} onClose={() => setChannelConfigOpen(false)} width={560}>
         <Tabs items={[
-          { key: 'weixin', label: '个人微信', children: <ChannelConfigSection channel="weixin" /> },
-          { key: 'wecom', label: '企业微信', children: <ChannelConfigSection channel="wecom" /> },
-          { key: 'dingtalk', label: '钉钉', children: <ChannelConfigSection channel="dingtalk" /> },
-          { key: 'feishu', label: '飞书', children: <ChannelConfigSection channel="feishu" /> },
+          { key: 'weixin', label: '个人微信', children: <ChannelConfigSection channel="weixin" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
+          { key: 'wecom', label: '企业微信', children: <ChannelConfigSection channel="wecom" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
+          { key: 'dingtalk', label: '钉钉', children: <ChannelConfigSection channel="dingtalk" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
+          { key: 'feishu', label: '飞书', children: <ChannelConfigSection channel="feishu" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
         ]} />
       </Drawer>
 
@@ -433,6 +433,8 @@ const TopBar: React.FC = () => {
 
 const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]; onSave: (providers: ModelProvider[]) => void }> = ({ type, providers, onSave }) => {
   const { message } = AntApp.useApp()
+  // 输入框下拉的选择（与配置页"默认"相互独立）
+  const { selectedModels: inputSelectedModels } = useConfigStore()
   const [items, setItems] = useState<ModelProvider[]>([])
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
@@ -459,6 +461,10 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
 
   const isDialogue = type === 'dialogue'
   const defaultModel = items.find(p => p.enabled && p.isPrimary) || items.find(p => p.enabled)
+  // 实际生效的对话模型：输入框选过（且已启用）则优先，否则用配置页"默认"
+  const effectiveDialogue = isDialogue
+    ? (inputSelectedModels.dialogue && items.find(p => p.enabled && p.id === inputSelectedModels.dialogue)) || defaultModel
+    : defaultModel
   const presetsAvailable = MODEL_PRESETS.filter(p => p.type === type && !items.some(i => i.id === p.id))
 
   const update = (index: number, patch: Partial<ModelProvider>) => {
@@ -475,7 +481,8 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
   const addPreset = (presetId: string) => {
     const preset = MODEL_PRESETS.find(p => p.id === presetId)
     if (!preset) return
-    setItems([...items, { ...preset, apiKey: '' }])
+    // Key 为空，默认未启用（填齐后开关才能点）
+    setItems([...items, { ...preset, apiKey: '', enabled: false, isPrimary: false }])
     setTestResults({})
   }
 
@@ -489,8 +496,9 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
       apiKey: '',
       modelName: '',
       params: isDialogue ? { temperature: 0.7, max_tokens: 65536 } : {},
-      enabled: true,
-      isPrimary: isDialogue && items.length === 0
+      // 必填项为空，默认未启用（填齐后开关才能点）
+      enabled: false,
+      isPrimary: false
     }])
     setTestResults({})
   }
@@ -533,7 +541,11 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
     setSelectedModels(prev => ({ ...prev, [providerId]: values }))
     if (values.length > 0) {
       const idx = items.findIndex(p => p.id === providerId)
-      if (idx >= 0) update(idx, { modelName: values[0] })
+      if (idx >= 0) {
+        // 名字保持"服务商 + 一个模型名"：先剥掉可能已有的旧后缀再拼接
+        const baseName = items[idx].name.split(' · ')[0]
+        update(idx, { modelName: values[0], name: `${baseName} · ${values[0]}` })
+      }
     }
   }
 
@@ -545,10 +557,11 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
       message.info('所选模型已在列表中')
       return
     }
+    const baseName = provider.name.split(' · ')[0]
     const newItems = additions.map((modelName, idx) => ({
       ...provider,
       id: `api-model-${Date.now()}-${idx}`,
-      name: `${provider.name} · ${modelName}`,
+      name: `${baseName} · ${modelName}`,
       modelName,
       enabled: false,
       isPrimary: false
@@ -569,9 +582,8 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
       setTestResults(prev => ({ ...prev, [provider.id]: { success: result.success, text: result.message } }))
       if (result.success) {
         message.success(`${provider.name}: ${result.message}`)
-      } else {
-        message.error(`${provider.name}: ${result.message}`)
       }
+      // 失败信息只显示在输入框下方的结果区，不再弹 toast（避免双份）
     } catch (err: any) {
       setTestResults(prev => ({ ...prev, [provider.id]: { success: false, text: err.message || '测试失败' } }))
     } finally {
@@ -580,6 +592,18 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
   }
 
   const handleSave = async () => {
+    // 校验：所有"已启用或设为默认"的模型，必填项必须齐全，否则阻止保存
+    const incomplete = items.find(p =>
+      (p.enabled || p.isPrimary) &&
+      (!(p.apiEndpoint || '').trim() || !(p.modelName || '').trim() || !(p.apiKey || '').trim())
+    )
+    if (incomplete) {
+      message.warning(
+        `模型「${incomplete.name}」已启用或设为默认，但必填项（API 端点、模型名称、API Key）未填全，请补全后再保存`
+      )
+      return
+    }
+
     // 仅提示不阻止：允许先不启用对话模型（例如只配置图片/视频模型）
     if (isDialogue && !items.some(p => p.enabled)) {
       message.warning('当前未启用任何对话模型，文本聊天将无法使用')
@@ -604,8 +628,8 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
         icon={defaultModel ? <ThunderboltOutlined /> : undefined}
         message={
           isDialogue
-            ? defaultModel
-              ? `当前对话将使用「${defaultModel.name}」${defaultModel.apiKey ? '' : '（API Key 未填写，请补充后测试）'}`
+            ? effectiveDialogue
+              ? `当前对话将使用「${effectiveDialogue.name}」${effectiveDialogue.apiKey ? '' : '（API Key 未填写，请补充后测试）'}`
               : '尚未启用任何对话模型，请添加并启用一个模型'
             : `已配置 ${items.filter(p => p.enabled).length}/${items.length} 个启用的${TYPE_LABELS[type]}`
         }
@@ -619,6 +643,10 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
       <div className="space-y-3">
         {items.map((provider, i) => {
           const testResult = testResults[provider.id]
+          const requiredFilled =
+            (provider.apiEndpoint || '').trim() &&
+            (provider.modelName || '').trim() &&
+            (provider.apiKey || '').trim()
           return (
             <Card
               key={provider.id}
@@ -627,29 +655,36 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
               title={
                 <div className="flex items-center gap-2">
                   {isDialogue && (
-                    <Tooltip title="设为默认对话模型">
-                      <Radio
-                        checked={!!provider.isPrimary}
-                        onChange={e => update(i, { isPrimary: e.target.checked, enabled: e.target.checked ? true : provider.enabled })}
-                      >
-                        <span className="text-xs">默认</span>
-                      </Radio>
+                    <Tooltip title={requiredFilled ? '设为默认对话模型' : '请先填写 API 端点、模型名称和 API Key'}>
+                      <span>
+                        <Radio
+                          checked={!!provider.isPrimary}
+                          disabled={!requiredFilled}
+                          onChange={e => update(i, { isPrimary: e.target.checked, enabled: e.target.checked ? true : provider.enabled })}
+                        >
+                          <span className="text-xs">默认</span>
+                        </Radio>
+                      </span>
                     </Tooltip>
                   )}
                   <span className="font-medium">{provider.name}</span>
                   <Tag color={provider.provider === '自定义' ? 'default' : 'blue'} className="text-xs">{provider.provider}</Tag>
-                  {provider.isPrimary && isDialogue && <StarFilled style={{ color: '#f59e0b' }} />}
                 </div>
               }
               extra={
                 <Space>
-                  <Switch
-                    checked={provider.enabled}
-                    onChange={v => update(i, { enabled: v })}
-                    checkedChildren="启用"
-                    unCheckedChildren="禁用"
-                    size="small"
-                  />
+                  <Tooltip title={requiredFilled ? '' : '请先填写 API 端点、模型名称和 API Key'}>
+                    <span>
+                      <Switch
+                        checked={provider.enabled}
+                        onChange={v => update(i, { enabled: v })}
+                        checkedChildren="启用"
+                        unCheckedChildren="禁用"
+                        size="small"
+                        disabled={!requiredFilled}
+                      />
+                    </span>
+                  </Tooltip>
                   <Popconfirm title="确认删除该模型？" onConfirm={() => remove(i)} okText="删除" cancelText="取消">
                     <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                   </Popconfirm>
@@ -713,11 +748,6 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
                     <Input.Password
                       value={provider.apiKey}
                       onChange={e => update(i, { apiKey: e.target.value })}
-                      onBlur={() => {
-                        if (provider.apiEndpoint && provider.apiKey && !modelLists[provider.id]) {
-                          handleFetchModels(provider)
-                        }
-                      }}
                       size="small"
                       placeholder="输入 API Key"
                       className="flex-1"
@@ -849,7 +879,7 @@ const CHANNEL_META: Record<string, {
   }
 }
 
-const ChannelConfigSection: React.FC<{ channel: string }> = ({ channel }) => {
+const ChannelConfigSection: React.FC<{ channel: string; onSaved?: () => void }> = ({ channel, onSaved }) => {
   const { message } = AntApp.useApp()
   const [form] = Form.useForm()
   const [enabled, setEnabled] = useState(false)
@@ -902,6 +932,8 @@ const ChannelConfigSection: React.FC<{ channel: string }> = ({ channel }) => {
       if (result.success) {
         setEnabled(nextEnabled)
         message.success(result.message || '配置已保存')
+        // 先提示成功，稍候再关闭页面
+        onSaved?.()
       } else {
         message.error(result.message || '保存失败')
       }

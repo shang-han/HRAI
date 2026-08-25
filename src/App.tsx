@@ -9,6 +9,7 @@ import TitleBar from './components/TitleBar'
 import ActivationPage from './components/ActivationPage'
 import CompanyOnboardingPage from './components/CompanyOnboardingPage'
 import OfflineBar from './components/OfflineBar'
+import HermesStatusBar from './components/HermesStatusBar'
 import WorkPriorityView from './components/WorkPriorityView'
 import TemplateManagerView from './components/TemplateManagerView'
 
@@ -164,6 +165,9 @@ const App: React.FC = () => {
             <TemplateManagerView onBack={() => setMainView('chat')} />
           ) : (
             <>
+              {/* Hermes 内核状态警告条（仅会话页面顶部，黄色，未运行时显示） */}
+              <HermesStatusBar />
+
               {/* 顶部栏 */}
               <TopBar />
 
