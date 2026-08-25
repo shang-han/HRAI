@@ -66,6 +66,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     export: (filePath: string) => ipcRenderer.invoke('template:export', filePath),
   },
 
+  // 定时任务/提醒模块
+  schedule: {
+    list: () => ipcRenderer.invoke('schedule:list'),
+    create: (task: any) => ipcRenderer.invoke('schedule:create', task),
+    update: (id: string, updates: any) => ipcRenderer.invoke('schedule:update', id, updates),
+    delete: (id: string) => ipcRenderer.invoke('schedule:delete', id),
+    onFired: (callback: (task: any) => void) => {
+      const listener = (_event: any, task: any) => callback(task)
+      ipcRenderer.on('schedule:fired', listener)
+      return () => ipcRenderer.removeListener('schedule:fired', listener)
+    },
+  },
+
   // 文件模块
   file: {
     export: (format: string, content: any, filePath?: string) =>
@@ -203,6 +216,13 @@ export interface ElectronAPI {
     delete: (id: string) => Promise<any>
     import: (filePath: string) => Promise<any>
     export: (filePath: string) => Promise<any>
+  }
+  schedule: {
+    list: () => Promise<any[]>
+    create: (task: any) => Promise<any>
+    update: (id: string, updates: any) => Promise<any>
+    delete: (id: string) => Promise<any>
+    onFired: (callback: (task: any) => void) => () => void
   }
   file: {
     export: (format: string, content: any, filePath?: string) => Promise<any>
