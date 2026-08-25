@@ -1,6 +1,6 @@
 {
   "name": "hermes-hr-admin",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Hermes 人事行政一体化智能专家",
   "main": "dist-electron/main.js",
   "scripts": {

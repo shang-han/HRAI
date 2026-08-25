@@ -28,7 +28,7 @@ function walk(dir) {
   function rec(base) {
     for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
       const full = path.join(base, entry.name)
-      const rel = path.relative(dir, full).replace(/\/g, '/')
+      const rel = path.relative(dir, full).replace(/\\/g, '/')
       if (entry.isDirectory()) {
         rec(full)
       } else {

@@ -19,18 +19,22 @@ interface PendingMessage {
   intent?: { hint?: string; id?: string }
 }
 
+interface WorkPriority {
+  title: string
+  background: string
+  targetAudience: string
+  scenario: string
+  createdAt: string
+  history?: WorkPriority[]
+}
+
 interface Session {
   id: string
   name: string
   createdAt: string
   updatedAt: string
   messageCount: number
-  workPriority?: {
-    title: string
-    background: string
-    targetAudience: string
-    scenario: string
-  }
+  workPriority?: WorkPriority
   /** 系统保留会话（默认会话）：禁止删除 */
   isDefault?: boolean
 }
