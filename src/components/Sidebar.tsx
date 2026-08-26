@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { useConfigStore } from '../store/configStore'
 import { HR_MENU } from '../data/hr-menu'
+import SchedulePanel from './SchedulePanel'
 import { Modal, Input, Button } from 'antd'
 import {
   PlusOutlined,
@@ -163,6 +164,8 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
             </div>
           </div>
         </div>
+
+        <SchedulePanel />
 
         {/* 近期重点工作 */}
         <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">

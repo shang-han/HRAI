@@ -97,9 +97,9 @@ export class ModelRouter {
     const providers: ModelProvider[] = config?.modelConfig?.dialogue || []
     const selId = config?.selectedModels?.dialogue
     return (
-      providers.find(p => p.enabled && p.id === selId) ||
-      providers.find(p => p.enabled && p.isPrimary) ||
-      providers.find(p => p.enabled) ||
+      providers.find((p: ModelProvider) => p.enabled && p.id === selId) ||
+      providers.find((p: ModelProvider) => p.enabled && p.isPrimary) ||
+      providers.find((p: ModelProvider) => p.enabled) ||
       null
     )
   }
@@ -248,9 +248,9 @@ export class ModelRouter {
     // 返回实际使用的模型：输入框选择 → 默认 → 第一个启用
     const selId = (config as any)?.selectedModels?.[taskType]
     return (
-      providers.find(p => p.enabled && p.id === selId) ||
-      providers.find(p => p.enabled && p.isPrimary) ||
-      providers.find(p => p.enabled) ||
+      providers.find((p: ModelProvider) => p.enabled && p.id === selId) ||
+      providers.find((p: ModelProvider) => p.enabled && p.isPrimary) ||
+      providers.find((p: ModelProvider) => p.enabled) ||
       providers[0] ||
       null
     )
@@ -261,9 +261,9 @@ export class ModelRouter {
     const providers = cfg.modelConfig?.multimodal || []
     const selId = cfg.selectedModels?.multimodal
     return (
-      providers.find(p => p.enabled && p.id === selId) ||
-      providers.find(p => p.enabled && p.isPrimary) ||
-      providers.find(p => p.enabled) ||
+      providers.find((p: ModelProvider) => p.enabled && p.id === selId) ||
+      providers.find((p: ModelProvider) => p.enabled && p.isPrimary) ||
+      providers.find((p: ModelProvider) => p.enabled) ||
       providers[0] ||
       null
     )
@@ -290,9 +290,9 @@ export class ModelRouter {
     const list = cfg.modelConfig?.[type] || []
     const selId = cfg.selectedModels?.[type]
     return (
-      list.find(p => p.enabled && p.id === selId) ||
-      list.find(p => p.enabled && p.isPrimary) ||
-      list.find(p => p.enabled) ||
+      list.find((p: ModelProvider) => p.enabled && p.id === selId) ||
+      list.find((p: ModelProvider) => p.enabled && p.isPrimary) ||
+      list.find((p: ModelProvider) => p.enabled) ||
       null
     )
   }

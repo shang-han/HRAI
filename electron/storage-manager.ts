@@ -84,6 +84,19 @@ interface Template {
   updatedAt: string
 }
 
+interface ScheduledTask {
+  id: string
+  title: string
+  content: string
+  dueAt: string
+  repeat: 'none' | 'daily' | 'weekly' | 'monthly'
+  kind: 'reminder' | 'task'
+  sessionId: string
+  enabled: boolean
+  lastFiredAt?: string | null
+  createdAt: string
+}
+
 export class StorageManager {
   private dataDir: string
   private logDir: string
@@ -97,6 +110,7 @@ export class StorageManager {
   private noticeFile: string
   private noticeReadFile: string
   private permissionFile: string
+  private scheduledTaskFile: string
 
   private sessions: Session[] = []
   private activeSessionId: string | null = null
@@ -118,6 +132,7 @@ export class StorageManager {
     this.noticeFile = path.join(userDataPath, 'notice.txt')
     this.noticeReadFile = path.join(this.dataDir, 'notice_read.json')
     this.permissionFile = path.join(this.dataDir, 'permission_config.json')
+    this.scheduledTaskFile = path.join(this.dataDir, 'scheduled_tasks.json')
 
     this.config = this.getDefaultConfig()
   }
@@ -422,7 +437,8 @@ export class StorageManager {
    */
   restoreWorkPriority(sessionId: string, historyIndex: number): boolean {
     const session = this.sessions.find(s => s.id === sessionId)
-    const current = session?.workPriority
+    if (!session) return false
+    const current = session.workPriority
     if (!current?.history || !current.history[historyIndex]) return false
 
     const target = current.history[historyIndex]
@@ -548,6 +564,41 @@ export class StorageManager {
 
   markAnnouncementRead(): void {
     this.saveJson(this.noticeReadFile, { lastReadAt: new Date().toISOString() })
+  }
+
+  // ============ 定时任务/提醒管理 ============
+  getScheduledTasks(): ScheduledTask[] {
+    return this.loadJson<ScheduledTask[]>(this.scheduledTaskFile, [])
+  }
+
+  createScheduledTask(input: Omit<ScheduledTask, 'id' | 'createdAt'>): ScheduledTask {
+    const task: ScheduledTask = {
+      ...input,
+      id: this.generateId(),
+      createdAt: new Date().toISOString()
+    }
+    const tasks = this.getScheduledTasks()
+    tasks.push(task)
+    this.saveJson(this.scheduledTaskFile, tasks)
+    return task
+  }
+
+  updateScheduledTask(id: string, updates: Partial<ScheduledTask>): boolean {
+    const tasks = this.getScheduledTasks()
+    const task = tasks.find(t => t.id === id)
+    if (!task) return false
+    Object.assign(task, updates)
+    this.saveJson(this.scheduledTaskFile, tasks)
+    return true
+  }
+
+  deleteScheduledTask(id: string): boolean {
+    const tasks = this.getScheduledTasks()
+    const index = tasks.findIndex(t => t.id === id)
+    if (index === -1) return false
+    tasks.splice(index, 1)
+    this.saveJson(this.scheduledTaskFile, tasks)
+    return true
   }
 
   // ============ 工具方法 ============

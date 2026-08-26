@@ -30,6 +30,15 @@ interface Session {
     background: string
     targetAudience: string
     scenario: string
+    createdAt: string
+    history?: Array<{
+      title: string
+      background: string
+      targetAudience: string
+      scenario: string
+      createdAt?: string
+      history?: any
+    }>
   }
   /** 系统保留会话（默认会话）：禁止删除 */
   isDefault?: boolean
@@ -49,6 +58,7 @@ interface SessionState {
   deleteSession: (id: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
+  refreshMessages: (sessionId: string) => Promise<void>
   sendMessage: (content: string, images?: string[], intent?: { hint?: string; id?: string }) => Promise<void>
   addMessage: (message: Message) => void
   updateLastAssistantMessage: (content: string) => void
@@ -312,6 +322,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ sessions })
     } catch (err) {
       console.error('重命名会话失败:', err)
+    }
+  },
+
+  refreshMessages: async (sessionId: string) => {
+    try {
+      const messages = await window.electronAPI.session.getMessages(sessionId)
+      set({ messages })
+    } catch (err) {
+      console.error('刷新会话消息失败:', err)
     }
   },
 

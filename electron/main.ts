@@ -23,6 +23,7 @@ let intentRouter: IntentRouter
 let channelManager: ChannelManager
 let giteeUpdater: GiteeUpdater
 let tray: Tray | null = null
+let scheduleTimer: ReturnType<typeof setInterval> | null = null
 let isQuitting = false
 let closeToTrayHintShown = false
 
@@ -141,6 +142,121 @@ function createWindow() {
   })
 }
 
+function startScheduledTaskChecker() {
+  if (scheduleTimer) return
+  scheduleTimer = setInterval(() => {
+    try { checkScheduledTasks() } catch { /* ignore */ }
+  }, 15 * 1000)
+  scheduleTimer.unref?.()
+  checkScheduledTasks()
+}
+
+function checkScheduledTasks() {
+  if (!storageManager) return
+  const now = Date.now()
+  const tasks = storageManager.getScheduledTasks()
+  for (const task of tasks) {
+    if (!task.enabled) continue
+    const due = new Date(task.dueAt).getTime()
+    if (!Number.isFinite(due) || due > now) continue
+    fireScheduledTask(task)
+  }
+}
+
+async function fireScheduledTask(task: any) {
+  const nowIso = new Date().toISOString()
+  const updates: any = { lastFiredAt: nowIso }
+  if (task.repeat && task.repeat !== 'none') {
+    const next = new Date(nowIso)
+    if (task.repeat === 'daily') next.setDate(next.getDate() + 1)
+    else if (task.repeat === 'weekly') next.setDate(next.getDate() + 7)
+    else if (task.repeat === 'monthly') next.setMonth(next.getMonth() + 1)
+    updates.dueAt = next.toISOString()
+  } else {
+    updates.enabled = false
+  }
+  storageManager.updateScheduledTask(task.id, updates)
+
+  const sessionId = task.sessionId || storageManager.getSessions()[0]?.id || ''
+  const messages: any[] = []
+  if (!sessionId) {
+    logManager?.warn('定时任务触发失败：没有可用会话')
+    mainWindow?.webContents.send('schedule:fired', { taskId: task.id, sessionId: '', messages: [] })
+    return
+  }
+
+  try {
+    if (task.kind === 'task') {
+      const userMessage = {
+        id: Date.now().toString(),
+        role: 'user' as const,
+        content: `⏰ 定时任务：${task.title || ''}
+${task.content || ''}`,
+        timestamp: new Date().toISOString()
+      }
+      storageManager.saveMessage(sessionId, userMessage)
+      messages.push(userMessage)
+
+      const sessionResult = await ensureHermesSession(sessionId)
+      if ('error' in sessionResult) {
+        const errorMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant' as const,
+          content: `⚠️ 定时任务执行失败：${sessionResult.error}`,
+          timestamp: new Date().toISOString()
+        }
+        storageManager.saveMessage(sessionId, errorMessage)
+        messages.push(errorMessage)
+      } else {
+        let full = ''
+        let errorText: string | null = null
+        try {
+          await hermesManager.sendPrompt(task.content || task.title || '', sessionResult.sessionId, {
+            onText: (text: string) => { full += text },
+            onThinking: () => {},
+            onDone: () => {},
+            onError: (error: string) => { errorText = error }
+          })
+        } catch (err: any) {
+          errorText = err.message || '定时任务执行失败'
+        }
+        const assistantMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant' as const,
+          content: errorText
+            ? `⚠️ 定时任务执行失败：${errorText}`
+            : (full || '（智能体未返回内容）'),
+          timestamp: new Date().toISOString()
+        }
+        storageManager.saveMessage(sessionId, assistantMessage)
+        messages.push(assistantMessage)
+      }
+    } else {
+      const reminderMessage = {
+        id: Date.now().toString(),
+        role: 'assistant' as const,
+        content: `📌 定时提醒：${task.title || ''}
+${task.content || ''}`,
+        timestamp: new Date().toISOString()
+      }
+      storageManager.saveMessage(sessionId, reminderMessage)
+      messages.push(reminderMessage)
+    }
+  } catch (err: any) {
+    logManager?.error('定时任务执行失败', err)
+    const errorMessage = {
+      id: Date.now().toString(),
+      role: 'assistant' as const,
+      content: `⚠️ 定时任务执行异常：${err.message}`,
+      timestamp: new Date().toISOString()
+    }
+    storageManager.saveMessage(sessionId, errorMessage)
+    messages.push(errorMessage)
+  }
+
+  mainWindow?.webContents.send('schedule:fired', { taskId: task.id, sessionId, messages })
+}
+
 async function initializeApp() {
   // 初始化日志
   logManager = new LogManager()
@@ -218,6 +334,9 @@ async function initializeApp() {
   channelManager.startAll().catch((err: any) => {
     logManager.warn(`渠道启动失败: ${err.message}`)
   })
+
+  // 启动定时提醒检查器
+  startScheduledTaskChecker()
 
   // 创建窗口
   createWindow()
@@ -485,7 +604,7 @@ function registerIpcHandlers() {
 
     return new Promise((resolve) => {
       let full = ''
-      hermesManager.sendPrompt(prepared.prompt, hermesSessionId, {
+      hermesManager.sendPrompt(prepared.prompt, sessionResult.sessionId, {
         onText: (text: string) => { full += text },
         onThinking: () => {},
         onDone: () => {
@@ -599,6 +718,43 @@ function registerIpcHandlers() {
   ipcMain.handle('template:export', async (_event, filePath: string) => {
     const templates = storageManager.getTemplates()
     return fileEngine.exportTemplates(filePath, templates)
+  })
+
+  // ============ 定时任务/提醒模块 ============
+  ipcMain.handle('schedule:list', async () => {
+    return storageManager.getScheduledTasks()
+  })
+
+  ipcMain.handle('schedule:create', async (_event, task: any) => {
+    const dueAt = task?.dueAt ? new Date(task.dueAt).toISOString() : new Date().toISOString()
+    const repeat = ['none', 'daily', 'weekly', 'monthly'].includes(task?.repeat) ? task.repeat : 'none'
+    const kind = task?.kind === 'task' ? 'task' : 'reminder'
+    const title = String(task?.title || '').trim()
+    const content = String(task?.content || '').trim()
+    const sessionId = String(task?.sessionId || '') || storageManager.getSessions()[0]?.id || ''
+    if (!title) return { success: false, error: '请填写标题' }
+    if (!sessionId) return { success: false, error: '请选择目标会话' }
+    return { success: true, task: storageManager.createScheduledTask({
+      title,
+      content,
+      dueAt,
+      repeat,
+      kind,
+      sessionId,
+      enabled: true,
+      lastFiredAt: null
+    }) }
+  })
+
+  ipcMain.handle('schedule:update', async (_event, id: string, updates: any) => {
+    if (!id) return { success: false, error: '缺少任务 ID' }
+    const clean: any = { ...updates }
+    if (clean.dueAt) clean.dueAt = new Date(clean.dueAt).toISOString()
+    return { success: storageManager.updateScheduledTask(id, clean) }
+  })
+
+  ipcMain.handle('schedule:delete', async (_event, id: string) => {
+    return { success: storageManager.deleteScheduledTask(id) }
   })
 
   // ============ 文件模块 ============
