@@ -1,6 +1,26 @@
 // Electron API 类型声明（渲染进程使用）
 export {}
 
+/**
+ * 上下文占用 / 提示词缓存用量（结构与 electron/hermes-manager.ts 的 SessionUsage 一致）。
+ * 渲染侧和 electron 侧是两个 tsconfig 项目，这里只能手抄一份；
+ * 改字段时两边必须一起改。
+ */
+export interface SessionUsage {
+  /** 模型上下文窗口（token）。0 = 内核还没报过 */
+  size: number
+  /** 当前请求预估占用（token） */
+  used: number
+  /** 最近一轮真实用量；input 已含缓存命中部分 */
+  lastTurn: { input: number; output: number; total: number; cachedRead: number; thought: number } | null
+  totalInput: number
+  totalCachedRead: number
+  /** 是否真的命中过缓存（>0）。为 false 时不能断言"线路不支持"，只能说没命中 */
+  cacheObserved: boolean
+  turns: number
+  updatedAt: number
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -12,9 +32,11 @@ declare global {
       session: {
         list: () => Promise<Array<{
           id: string; name: string; createdAt: string; updatedAt: string;
-          messageCount: number; workPriority?: any
+          messageCount: number; workPriority?: any; workDir?: string
         }>>
-        create: (name?: string) => Promise<{ id: string; name: string; createdAt: string }>
+        create: (name?: string, workDir?: string) => Promise<{ id: string; name: string; createdAt: string }>
+        setWorkDir: (sessionId: string, workDir: string) =>
+          Promise<{ success: boolean; workDir?: string; error?: string }>
         delete: (sessionId: string) => Promise<boolean>
         switch: (sessionId: string) => Promise<boolean>
         rename: (sessionId: string, name: string) => Promise<boolean>
@@ -65,6 +87,18 @@ declare global {
       file: {
         export: (format: string, content: any, filePath?: string) => Promise<{ success: boolean; message?: string; error?: string }>
         import: () => Promise<{ success: boolean; content?: string; type?: string; error?: string }>
+      }
+      workdir: {
+        /** defaultPath=内置工作区绝对路径；last=上次使用（空串=内置）；recent=快选历史（均已过滤失效目录） */
+        info: () => Promise<{ defaultPath: string; last: string; recent: string[] }>
+        pick: (current?: string) => Promise<{ success: boolean; path?: string; error?: string }>
+        reveal: (dir?: string) => Promise<{ success: boolean; error?: string }>
+      }
+      usage: {
+        /** 挂载/切会话时主动拉一次；没有数据（会话还没对话过）返回 null */
+        get: (sessionId: string) => Promise<SessionUsage | null>
+        /** usage 为 null 表示该会话的智能体上下文已被丢弃（删会话/改工作目录） */
+        onUpdate: (callback: (payload: { sessionId: string; usage: SessionUsage | null }) => void) => () => void
       }
       announcement: {
         check: () => Promise<{ hasNew: boolean; content: string }>

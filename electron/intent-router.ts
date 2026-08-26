@@ -81,6 +81,8 @@ export class IntentRouter {
   private endedAt = new Set<string>()
   private companyProfile: any = null
   private storageManager: any = null
+  /** 内置工作区绝对路径；会话没单独设工作目录时用它 */
+  private defaultWorkDir = ''
 
   constructor(logManager: any, storageManager?: any) {
     this.logManager = logManager
@@ -117,15 +119,17 @@ export class IntentRouter {
    */
   prepare(original: string, meta?: IntentMeta, sessionId?: string): PreparedIntent {
     // 会话的近期重点工作：无论是否命中业务意图，都作为上下文注入 prompt
-    const workPriority = sessionId
-      ? this.storageManager?.getSessionById?.(sessionId)?.workPriority
-      : null
+    const session = sessionId ? this.storageManager?.getSessionById?.(sessionId) : null
+    const workPriority = session?.workPriority || null
     const match = this.match(original, meta)
 
     if (!match) {
       return {
         taskId: this.makeTaskId(),
-        prompt: this.withWorkPriorityContext(original, workPriority),
+        prompt: this.withWorkPriorityContext(
+          this.withCustomWorkDirNote(original, session?.workDir || ''),
+          workPriority
+        ),
         matched: false,
         source: 'none',
         matchedBy: '',
@@ -136,7 +140,7 @@ export class IntentRouter {
 
     const intent = match.intent
     const prompt = this.withWorkPriorityContext(
-      this.buildPrompt(original, intent, match.source, match.matchedBy),
+      this.buildPrompt(original, intent, match.source, match.matchedBy, session?.workDir || ''),
       workPriority
     )
 
@@ -166,6 +170,24 @@ export class IntentRouter {
     if (wp.scenario) lines.push(`- 使用场景：${wp.scenario}`)
     lines.push('')
     return lines.join('\n') + prompt
+  }
+
+  /**
+   * 自选工作目录的最小提醒，只用于「没命中业务意图」的自由对话
+   * （命中意图时 buildPrompt 里已有完整的【工作区说明】，不重复注入）。
+   * 为什么非要有这一段：cwd 指向用户自己的资料目录时，"产物写 output/、
+   * 别乱动无关文件"这条约束在内置工作区是靠 AGENTS.md 兜着的，
+   * 用户目录里没有那份文件，只能在信封里补上。
+   */
+  private withCustomWorkDirNote(prompt: string, workDir: string): string {
+    const dir = (workDir || '').trim()
+    if (!dir) return prompt
+    return [
+      '【工作区说明】',
+      `- 当前工作目录为 ${dir}（用户为本会话指定），所有相对路径都相对它解析。`,
+      '- 只在本目录范围内读写；生成的文件放进其中的 output/ 子目录（不存在时先创建），不要改动与本次任务无关的既有文件。',
+      ''
+    ].join('\n') + prompt
   }
 
   private match(original: string, meta?: IntentMeta):
@@ -231,7 +253,8 @@ export class IntentRouter {
     original: string,
     intent: IntentDefinition,
     source: 'nav' | 'keyword',
-    matchedBy: string
+    matchedBy: string,
+    sessionWorkDir?: string
   ): string {
     const lines: string[] = []
     lines.push('【Hermes HR 业务任务指令】')
@@ -266,12 +289,24 @@ export class IntentRouter {
     for (const item of intent.guardrails) {
       lines.push(`- ${item}`)
     }
-    lines.push('- 所有文件产物只允许写入当前工作区的 output/ 目录，并在回复末尾用“📎 生成文件”列出相对路径。')
+    lines.push('- 所有文件产物只允许写入当前工作目录下的 output/ 子目录（不存在时先创建），并在回复末尾用“📎 生成文件”列出相对路径。')
     lines.push('- 回复末尾固定包含两部分：缺失信息（待确认字段）与 2~4 条下一步建议。')
     lines.push('')
+    // 工作区说明必须按会话真实 cwd 生成：用户自选目录里没有 company_context.json /
+    // data/ / AGENTS.md，硬写"当前工作目录为 workspace/"会让 AI 去找不存在的文件，
+    // 甚至试图跳出 cwd 去访问内置工作区。
+    const builtin = (this.defaultWorkDir || '').trim()
+    const cwd = (sessionWorkDir || '').trim() || builtin
+    const isBuiltin = !(sessionWorkDir || '').trim()
     lines.push('【工作区说明】')
-    lines.push('- 当前工作目录为 workspace/。如存在 company_context.json 或 data/ 台账文件，先读取以获取公司上下文。')
-    lines.push('- 若 workspace/AGENTS.md 存在，其中的规则优先级高于本指令中相冲突的表述。')
+    if (cwd) lines.push(`- 当前工作目录为 ${cwd}，所有相对路径都相对它解析。`)
+    if (isBuiltin) {
+      lines.push('- 如存在 company_context.json 或 data/ 台账文件，先读取以获取公司上下文。')
+      lines.push('- 若工作目录下 AGENTS.md 存在，其中的规则优先级高于本指令中相冲突的表述。')
+    } else {
+      lines.push('- 这是用户为本会话指定的工作目录，里面可能已有用户自己的资料：动手前先列目录了解结构，不要凭空假设文件布局。')
+      lines.push('- 只在本目录范围内读写，不要改动与本次任务无关的既有文件；若目录下存在 AGENTS.md / README.md，其规则优先级高于本指令中相冲突的表述。')
+    }
     lines.push('')
     lines.push('【用户原话】')
     lines.push(original)
@@ -280,6 +315,11 @@ export class IntentRouter {
 
   setCompanyProfile(profile: any): void {
     this.companyProfile = profile || null
+  }
+
+  /** 由 main.ts 在启动时注入内置工作区路径（HermesManager.getWorkspacePath()） */
+  setDefaultWorkDir(dir: string): void {
+    this.defaultWorkDir = dir || ''
   }
 
   private makeTaskId(): string {

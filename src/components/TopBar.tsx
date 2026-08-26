@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useConfigStore } from '../store/configStore'
 import { useSessionStore } from '../store/sessionStore'
+import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
+import ContextMeter from './ContextMeter'
 import { App as AntApp, Button, Tooltip, Badge, Modal, Drawer, Tabs, Form, Input, Switch, Select, Alert, Card, Radio, Space, Tag, InputNumber, Slider, Popconfirm, Empty, Divider } from 'antd'
 import {
   SettingOutlined,
@@ -13,6 +15,8 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ThunderboltOutlined,
+  FolderOutlined,
+  FolderOpenOutlined,
   PlusOutlined,
   DeleteOutlined,
   CheckCircleFilled,
@@ -59,7 +63,7 @@ const MODEL_PRESETS: ModelProvider[] = [
 
 const TopBar: React.FC = () => {
   const { theme, setTheme, modelConfig, setModelConfig, layout, toggleSidebar } = useConfigStore()
-  const { sessions, activeSessionId } = useSessionStore()
+  const { sessions, activeSessionId, setSessionWorkDir } = useSessionStore()
   const { message } = AntApp.useApp()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [modelConfigOpen, setModelConfigOpen] = useState(false)
@@ -79,8 +83,37 @@ const TopBar: React.FC = () => {
   const [appVersion, setAppVersion] = useState('')
   // 模型配置抽屉当前激活的标签页（footer 保存按钮按此触发对应类型的保存）
   const [modelTabKey, setModelTabKey] = useState('dialogue')
+  const [workDirOpen, setWorkDirOpen] = useState(false)
+  // 内置工作区的绝对路径，仅用于胶囊 Tooltip 展示"AI 实际在哪干活"
+  const [builtinWorkDir, setBuiltinWorkDir] = useState('')
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
+  const activeWorkDir = activeSession?.workDir || ''
+  const workDirText = activeWorkDir ? workDirLabel(activeWorkDir) : '内置工作区'
+  const workDirFull = activeWorkDir || builtinWorkDir
+
+  useEffect(() => {
+    window.electronAPI.workdir.info()
+      .then(info => setBuiltinWorkDir(info?.defaultPath || ''))
+      .catch(() => { /* 拿不到就只显示"内置工作区"文案，不影响功能 */ })
+  }, [])
+
+  const handleWorkDirSubmit = async (_name: string, dir: string) => {
+    if (!activeSessionId) return
+    // 没改就直接关掉：确认一次目录不该白白付出"重开 ACP 会话 = 上下文归零"的代价。
+    // Windows 路径大小写不敏感，比较前统一小写。
+    if ((dir || '').toLowerCase() === activeWorkDir.toLowerCase()) {
+      setWorkDirOpen(false)
+      return
+    }
+    const res = await setSessionWorkDir(activeSessionId, dir)
+    if (!res.success) {
+      message.error(res.error || '工作目录设置失败')
+      return
+    }
+    setWorkDirOpen(false)
+    message.success(dir ? `工作目录已切换到 ${dir}` : '已切换回内置工作区')
+  }
 
   useEffect(() => {
     checkAnnouncement()
@@ -193,6 +226,32 @@ const TopBar: React.FC = () => {
             当前会话：
             <strong className="text-ink">{activeSession?.name || '无'}</strong>
           </span>
+          {/* 工作目录常驻可见：智能体在哪读写文件必须一眼能看到——
+              权限模式是全局的，auto 模式下 cwd 里的任何文件都可能被改写，
+              把它藏进设置里是不负责任的。点击即改（含上下文重置确认）。 */}
+          {activeSession && (
+            <Tooltip title={workDirFull ? `工作目录：${workDirFull}（点击修改）` : '点击选择该会话的工作目录'}>
+              <span
+                className="hermes-workdir-chip"
+                onClick={() => setWorkDirOpen(true)}
+              >
+                <FolderOutlined />
+                <span className="truncate">{workDirText}</span>
+              </span>
+            </Tooltip>
+          )}
+          {activeSession && workDirFull && (
+            <Tooltip title="在文件管理器中打开工作目录">
+              <Button
+                size="small"
+                type="text"
+                icon={<FolderOpenOutlined />}
+                onClick={() => window.electronAPI.workdir.reveal(workDirFull)}
+              />
+            </Tooltip>
+          )}
+          {/* 上下文占用率：只有内核报过窗口长度才会渲染，没数据时组件自己返回 null */}
+          {activeSessionId && <ContextMeter sessionId={activeSessionId} />}
         </div>
         <div className="flex gap-2 items-center">
           <Tooltip title="模型配置">
@@ -223,6 +282,16 @@ const TopBar: React.FC = () => {
           </Tooltip>
         </div>
       </div>
+
+      {/* 会话工作目录弹窗（修改已有会话） */}
+      <SessionWorkDirModal
+        open={workDirOpen}
+        mode="change"
+        initialWorkDir={activeWorkDir}
+        messageCount={activeSession?.messageCount || 0}
+        onCancel={() => setWorkDirOpen(false)}
+        onSubmit={handleWorkDirSubmit}
+      />
 
       {/* 模型配置抽屉 */}
       <Drawer

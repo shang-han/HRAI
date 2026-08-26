@@ -71,8 +71,8 @@ const ChatArea: React.FC = () => {
     // 空态不抢 flex-1：由 App 里的上下弹性占位把「问候语 + 输入框」整体垂直居中。
     // 允许收缩 + 内部滚动，窗口很矮时问候语自己滚，不会把输入框顶出可视区。
     return (
-      <div className="min-h-0 overflow-y-auto px-4 pt-4 pb-2">
-        <div className="w-full max-w-[820px] mx-auto text-center">
+      <div className="min-h-0 overflow-y-auto pt-4 pb-2">
+        <div className="hermes-thread-col text-center">
           <h2 className="hermes-greeting text-[28px] leading-snug font-medium mb-2">
             您好，我是人事行政一体化智能专家
           </h2>
@@ -111,17 +111,15 @@ const ChatArea: React.FC = () => {
       className="flex-1 overflow-auto min-h-0"
     >
       {/* min-h-full + justify-end：内容不满屏时贴在底部（紧挨输入框），满屏后正常滚动 */}
-      {/* 消息列宽度与输入框对齐（都是 max-w-[820px] 居中） */}
-      <div className="min-h-full w-full max-w-[820px] mx-auto flex flex-col justify-end py-4 px-4 space-y-4">
+      {/* 列宽/左右边界由 .hermes-thread-col 统一（与输入框、空态问候语同一个类） */}
+      <div className="hermes-thread-col min-h-full flex flex-col justify-end py-4 space-y-4">
       {messages.map((message) => (
         <div
           key={message.id}
-          className={`flex message-enter items-start gap-2 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          className={`flex message-enter relative items-start ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
           {message.role !== 'user' && (
-            <div className="w-6 h-6 rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0 mt-1 select-none">
-              AI
-            </div>
+            <div className="hermes-msg-avatar">AI</div>
           )}
           <div
             className={`max-w-[70%] rounded-2xl px-4 py-3 ${
@@ -181,10 +179,8 @@ const ChatArea: React.FC = () => {
 
       {/* 加载中指示器 */}
       {isLoading && messages[messages.length - 1]?.role === 'user' && (
-        <div className="flex justify-start items-start gap-2 message-enter">
-          <div className="w-6 h-6 rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0 mt-1 select-none">
-            AI
-          </div>
+        <div className="flex justify-start relative items-start message-enter">
+          <div className="hermes-msg-avatar">AI</div>
           <div className="hermes-glass rounded-2xl px-4 py-3">
             <div className="flex gap-1">
               <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />

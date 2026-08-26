@@ -36,6 +36,10 @@ let savedNormalBounds: Electron.Rectangle | null = null
 const hermesSessions = new Map<string, string>()
 // ACP 审批请求 -> Promise resolve
 const pendingApprovals = new Map<number, (allow: boolean) => void>()
+// 前端会话 -> 上下文占用/缓存用量快照。
+// HermesManager 只认 ACP 会话 id，这里保存反查后的结果，
+// 供渲染进程挂载/切会话时一次性取（IPC 推送只覆盖"变化时"）。
+const usageBySession = new Map<string, any>()
 
 /**
  * 聊天前置检查：返回"为什么不能用"的说明，null 表示可以发送。
@@ -283,6 +287,9 @@ async function initializeApp() {
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
 
+  // 提示词里的"当前工作目录"要按会话真实 cwd 生成，先把内置工作区告诉意图路由
+  intentRouter.setDefaultWorkDir(hermesManager.getWorkspacePath())
+
   // 清理旧版本遗留的 gateway/channel_sync 进程，避免微信/企微双通道抢消息
   await hermesManager.killLegacyGatewayProcesses().catch((err: any) => {
     logManager.debug(`旧进程清理跳过: ${err.message}`)
@@ -308,6 +315,20 @@ async function initializeApp() {
       }, 5 * 60 * 1000)
       mainWindow?.webContents.send('permission:request', payload)
     })
+  })
+
+
+  // 上下文占用/缓存用量：内核按 ACP 会话 id 上报，这里反查回前端会话 id 再推给界面。
+  // 反查用遍历而不是再维护一张反向表：hermesSessions 的规模等于会话数（几十条量级），
+  // 而两张表同步失配的代价是用量显示串到别的会话上——不值得为这点开销冒险。
+  hermesManager.onUsage((acpSessionId: string, usage: any) => {
+    let frontendId = ''
+    for (const [fid, aid] of hermesSessions) {
+      if (aid === acpSessionId) { frontendId = fid; break }
+    }
+    if (!frontendId) return
+    usageBySession.set(frontendId, usage)
+    mainWindow?.webContents.send('usage:update', { sessionId: frontendId, usage })
   })
 
 
@@ -381,8 +402,19 @@ async function ensureHermesSession(sessionId: string): Promise<{ sessionId: stri
     }
     let hermesSessionId = hermesSessions.get(sessionId)
     if (!hermesSessionId) {
-      hermesSessionId = await hermesManager.createSession()
+      // 每个前端会话按自己的工作目录开 ACP 会话。空 workDir = 内置工作区，
+      // 由 HermesManager.sessionCwd() 兜底，这里不做回填。
+      const workDir = storageManager.getSessionById(sessionId)?.workDir || ''
+      hermesSessionId = await hermesManager.createSession(workDir)
       hermesSessions.set(sessionId, hermesSessionId)
+      // 内核在 session/new 里就推了第一条 usage_update，那时映射还没建立，
+      // onUsage 的反查必然落空。这里补一次同步，否则"新会话的初始占用率"
+      // 要等到第一轮对话结束才出现。
+      const initial = hermesManager.getUsage(hermesSessionId)
+      if (initial) {
+        usageBySession.set(sessionId, initial)
+        mainWindow?.webContents.send('usage:update', { sessionId, usage: initial })
+      }
     }
     return { sessionId: hermesSessionId }
   } catch (err: any) {
@@ -393,6 +425,67 @@ async function ensureHermesSession(sessionId: string): Promise<{ sessionId: stri
     }
     return { error: `Hermes 会话创建失败：${msg}` }
   }
+}
+
+/**
+ * 校验用户选定的会话工作目录。
+ *
+ * 空串是合法输入，含义是"用内置工作区"。其余情况必须落在真实目录上，
+ * 并挡掉两类会造成实际损害的选择：
+ *  1) 盘符根目录（D:\ / /）——智能体的读写与命令都在 cwd 里跑，权限模式为 auto 时
+ *     一条误判的清理命令就能扫掉整个盘；这类目录也没有任何"项目"语义。
+ *  2) Hermes 安装目录内部——resources/hermes 下有内核自己的 AGENTS.md，
+ *     Python 侧 runtime_cwd._is_install_tree() 正是为此设了防线；把 cwd 指进去会
+ *     让贡献者文档变成"项目上下文"，且 AI 有机会改坏内核自身。
+ */
+function validateWorkDir(raw: string): { ok: true; path: string } | { ok: false; error: string } {
+  const input = (raw || '').trim()
+  if (!input) return { ok: true, path: '' }
+
+  let resolved: string
+  try {
+    resolved = path.resolve(input)
+    if (!fs.statSync(resolved).isDirectory()) {
+      return { ok: false, error: '所选路径不是一个文件夹' }
+    }
+  } catch {
+    return { ok: false, error: '目录不存在或无法访问，请重新选择' }
+  }
+
+  if (path.dirname(resolved) === resolved) {
+    return { ok: false, error: '不能直接使用磁盘根目录，请选择具体的项目/资料文件夹' }
+  }
+
+  // 大小写不敏感 + 以 sep 结尾比较，避免 "…\hermes-x" 被误判为 "…\hermes" 的子目录
+  const install = path.resolve(hermesManager.getInstallRoot()).toLowerCase()
+  const target = resolved.toLowerCase()
+  if (target === install || target.startsWith(install + path.sep)) {
+    return { ok: false, error: '不能选择 Hermes 智能体自身的安装目录，请另选一个工作文件夹' }
+  }
+
+  // 手动浏览到内置工作区时归一成空串，让它和"选内置工作区"这个选项完全等价：
+  // 否则同一个目录会存成绝对路径，提示词里走"用户自选目录"分支，
+  // 反而丢掉 company_context.json / AGENTS.md 那几条说明。
+  if (target === path.resolve(hermesManager.getWorkspacePath()).toLowerCase()) {
+    return { ok: true, path: '' }
+  }
+
+  return { ok: true, path: resolved }
+}
+
+/**
+ * 丢弃一个前端会话对应的 ACP 会话，并连带清掉它的用量统计。
+ *
+ * 两处调用（删会话 / 改工作目录）都必须把用量一起清零：ACP 会话被丢弃后
+ * 下一轮会用新 cwd 重开会话，智能体侧上下文是真的归零了，
+ * 界面上继续挂着旧占用率就是在撒谎。
+ */
+function dropHermesSession(sessionId: string): void {
+  const acpId = hermesSessions.get(sessionId)
+  if (acpId) hermesManager.clearUsage(acpId)
+  hermesSessions.delete(sessionId)
+  usageBySession.delete(sessionId)
+  mainWindow?.webContents.send('usage:update', { sessionId, usage: null })
 }
 
 function registerIpcHandlers() {
@@ -414,13 +507,55 @@ function registerIpcHandlers() {
     return storageManager.getSessions()
   })
 
-  ipcMain.handle('session:create', async (_event, name?: string) => {
-    return storageManager.createSession(name)
+  ipcMain.handle('session:create', async (_event, name?: string, workDir?: string) => {
+    // 区分"显式传目录"和"没传"：弹窗一定会传字符串（空串=内置工作区），
+    // 而 /new 斜杠命令这类隐式建会话传的是 undefined。两者语义不同：
+    //   显式 → 用它，并写进偏好（last/recent）；
+    //   隐式 → 沿用上次用过的目录，且绝不回写偏好——否则一次 /new 就会把
+    //           last 冲成空串，用户下次开弹窗发现"沿用上次"退回了内置工作区。
+    const explicit = typeof workDir === 'string'
+    const wanted = explicit ? workDir : storageManager.getWorkDirPrefs().last
+    const check = validateWorkDir(wanted || '')
+    // 目录非法时不阻断建会话：退回内置工作区，用户随后可在会话上改。
+    // 直接抛错会让"新建会话"这个基础动作因为一个可恢复的选择失败。
+    const dir = check.ok ? check.path : ''
+    if (!check.ok) logManager?.warn(`新建会话的工作目录无效（已回退内置工作区）: ${check.error}`)
+    const session = storageManager.createSession(name, dir)
+    // 空串也要写进 last，"默认沿用上次"在用户特意选内置工作区时才成立
+    if (explicit) storageManager.pushRecentWorkDir(dir)
+    return session
+  })
+
+  /**
+   * 改会话工作目录。必须同时丢掉 hermesSessions 里的 ACP 会话映射：
+   * cwd 是 session/new 的入参，已建立的 ACP 会话改不了 cwd，
+   * 下一轮对话会用新目录重开一个会话——代价是智能体侧上下文归零
+   * （前端聊天记录不受影响），所以 UI 上必须做二次确认。
+   */
+  ipcMain.handle('session:setWorkDir', async (_event, sessionId: string, workDir: string) => {
+    const check = validateWorkDir(workDir || '')
+    if (!check.ok) return { success: false, error: check.error }
+    if (!storageManager.setSessionWorkDir(sessionId, check.path)) {
+      return { success: false, error: '会话不存在' }
+    }
+    dropHermesSession(sessionId)
+    storageManager.pushRecentWorkDir(check.path)
+    logManager?.info(`会话 ${sessionId} 工作目录已切换为: ${check.path || '内置工作区'}`)
+    return { success: true, workDir: check.path }
   })
 
   ipcMain.handle('session:delete', async (_event, sessionId: string) => {
-    hermesSessions.delete(sessionId)
+    dropHermesSession(sessionId)
     return storageManager.deleteSession(sessionId)
+  })
+
+  /**
+   * 取某会话的上下文占用/缓存用量快照。
+   * 推送（usage:update）只在变化时发，渲染进程挂载和切会话时得主动拉一次，
+   * 否则切回一个老会话会看到空白，直到下一轮对话结束才恢复。
+   */
+  ipcMain.handle('usage:get', async (_event, sessionId: string) => {
+    return usageBySession.get(sessionId) || null
   })
 
   ipcMain.handle('session:switch', async (_event, sessionId: string) => {
@@ -777,6 +912,42 @@ function registerIpcHandlers() {
     })
     if (result.canceled || result.filePaths.length === 0) return { success: false }
     return fileEngine.importFile(result.filePaths[0])
+  })
+
+  // ============ 工作目录模块 ============
+  // 会话工作目录 = 智能体的 cwd。这里只负责"选目录 / 给候选 / 打开目录"，
+  // 真正生效在 session:create 与 session:setWorkDir。
+  ipcMain.handle('workdir:info', async () => {
+    // recent / last 里的目录可能已被删除或移走，先过滤再给前端，
+    // 否则快选列表全是死路径，且"默认沿用上次"会直接选中一个不存在的目录
+    const isDir = (p: string) => {
+      try { return !!p && fs.statSync(p).isDirectory() } catch { return false }
+    }
+    const prefs = storageManager.getWorkDirPrefs()
+    return {
+      defaultPath: hermesManager.getWorkspacePath(),
+      last: isDir(prefs.last) ? prefs.last : '',
+      recent: prefs.recent.filter(isDir)
+    }
+  })
+
+  ipcMain.handle('workdir:pick', async (_event, current?: string) => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '选择该会话的工作目录',
+      // createDirectory 只在 macOS 生效，Windows 的对话框自带"新建文件夹"
+      properties: ['openDirectory', 'createDirectory'],
+      ...(current && fs.existsSync(current) ? { defaultPath: current } : {})
+    })
+    if (result.canceled || result.filePaths.length === 0) return { success: false }
+    const check = validateWorkDir(result.filePaths[0])
+    if (!check.ok) return { success: false, error: check.error }
+    return { success: true, path: check.path }
+  })
+
+  ipcMain.handle('workdir:reveal', async (_event, dir?: string) => {
+    const target = (dir || '').trim() || hermesManager.getWorkspacePath()
+    const err = await shell.openPath(target)
+    return { success: !err, error: err || undefined }
   })
 
   // ============ 公告模块 ============

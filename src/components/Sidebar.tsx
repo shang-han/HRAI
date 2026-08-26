@@ -1,8 +1,15 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
-import { useConfigStore } from '../store/configStore'
+import {
+  useConfigStore,
+  SIDEBAR_MIN_W,
+  SIDEBAR_MAX_W,
+  SIDEBAR_DEFAULT_W,
+  SIDEBAR_COLLAPSED_W
+} from '../store/configStore'
 import SchedulePanel from './SchedulePanel'
-import { Modal, Input, Button } from 'antd'
+import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
+import { Modal, Input, Button, Tooltip } from 'antd'
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -15,17 +22,19 @@ import {
   StarOutlined,
   LeftOutlined,
   RightOutlined,
+  FolderOutlined,
   CaretDownOutlined,
   CaretRightOutlined
 } from '@ant-design/icons'
 
 const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }> = ({ onOpenWork, onOpenTemplates }) => {
   const { sessions, activeSessionId, createSession, deleteSession, switchSession, renameSession } = useSessionStore()
-  const { layout, toggleSidebar } = useConfigStore()
+  const { layout, toggleSidebar, setSidebarWidth } = useConfigStore()
   const [searchText, setSearchText] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState({
     sessions: true,
     workPriority: true,
@@ -38,6 +47,71 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({})
   const collapsed = layout.sidebarCollapsed
   const activeSession = sessions.find(s => s.id === activeSessionId)
+
+  const asideRef = useRef<HTMLElement>(null)
+  const [resizing, setResizing] = useState(false)
+
+  // 拖动调整侧边栏宽度。
+  //
+  // 1) 拖动过程中直接写 DOM style，不经过 React state：侧边栏里业务导航树是
+  //    上百个常驻节点（收起的层级只是 grid-rows-[0fr] 藏起来，DOM 仍在），
+  //    每次 move 都触发重渲染会明显掉帧。松手时才提交到 store 并落盘。
+  //    这里"绕过 React"是安全的：pointerup 一定会把最终值写进 store，
+  //    之后 store 值与 DOM 值一致，React 后续渲染不会把宽度拽回去。
+  // 2) 用 Pointer Events + setPointerCapture，而不是在 window 上挂
+  //    mousemove/mouseup：这个手柄天生就是往窗口边缘拖的，鼠标在窗口外松开时
+  //    mouseup 根本不会派发到页面，拖动状态会一直卡着——等指针再回到窗口，
+  //    没按键也跟着走。指针捕获能保证 up/cancel 一定回到手柄自己身上。
+  const startResizeWidth = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 刻意不调 e.preventDefault()：在 pointerdown 上 preventDefault 会不会连带
+    // 吞掉后续的 dblclick，各版本 Chromium 行为不一致，而双击是"恢复默认宽度"
+    // 的入口。文本选择改由 .hermes-sidebar-resizer 的 user-select: none
+    // 与拖动期间 body 上的全局禁选负责，不需要 preventDefault。
+    const el = asideRef.current
+    if (!el) return
+    const handle = e.currentTarget
+    const pointerId = e.pointerId
+    const startX = e.clientX
+    const startWidth = el.getBoundingClientRect().width
+    let next = startWidth
+
+    handle.setPointerCapture(pointerId)
+    setResizing(true)
+    document.body.classList.add('hermes-col-resizing')
+
+    const onMove = (ev: PointerEvent) => {
+      // 上限除了固定的 SIDEBAR_MAX_W，还要受当前窗口宽度约束：
+      // 给右侧聊天区至少留 420px，否则窄窗口下能把聊天区挤到没法用。
+      // 外层再套一次 max(MIN, ...)：窗口极窄时 innerWidth-420 可能小于下限，
+      // 那样 upper < MIN，clamp 会算出比下限还小的值。
+      const upper = Math.max(SIDEBAR_MIN_W, Math.min(SIDEBAR_MAX_W, window.innerWidth - 420))
+      next = Math.min(upper, Math.max(SIDEBAR_MIN_W, startWidth + ev.clientX - startX))
+      el.style.width = `${next}px`
+    }
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('pointercancel', onUp)
+      // pointerup 时浏览器已隐式释放捕获，直接 release 会抛 NotFoundError
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId)
+      document.body.classList.remove('hermes-col-resizing')
+      setResizing(false)
+      // 只有真的拖动过才落盘。单纯点一下手柄、或双击（双击会先派发两次
+      // pointerdown/up）都不该产生写操作，否则一次双击要写三遍配置文件。
+      if (next !== startWidth) setSidebarWidth(next, true)
+    }
+    // 捕获期间 move/up 都派发到捕获元素本身，所以监听挂在手柄上而非 window
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointercancel', onUp)
+  }
+
+  // 双击手柄恢复默认宽度（和输入框那个高度手柄一致的交互）
+  const resetWidth = () => {
+    const el = asideRef.current
+    if (el) el.style.width = `${SIDEBAR_DEFAULT_W}px`
+    setSidebarWidth(SIDEBAR_DEFAULT_W, true)
+  }
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key as keyof typeof prev] }))
@@ -54,6 +128,13 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
     }
     setRenaming(null)
     setRenameValue('')
+  }
+
+  // 新建会话统一走弹窗（名称 + 工作目录），两个 "+" 入口都指向这里。
+  // 名称留空时交给主进程按 `会话 N` 生成，不在前端重复那套编号逻辑。
+  const handleCreateSession = async (name: string, workDir: string) => {
+    await createSession(name || undefined, workDir)
+    setNewSessionOpen(false)
   }
 
   // 业务导航数据
@@ -98,21 +179,53 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
     }
   ]
 
+  // 新建会话弹窗在收起态也要能弹出来（收起态的 "+" 是唯一入口），
+  // 所以两个分支各自渲染一次，而不是只挂在展开态那棵树上
+  const newSessionModal = (
+    <SessionWorkDirModal
+      open={newSessionOpen}
+      mode="create"
+      initialName={`会话 ${sessions.length + 1}`}
+      onCancel={() => setNewSessionOpen(false)}
+      onSubmit={handleCreateSession}
+    />
+  )
+
   if (collapsed) {
     return (
-      <aside className="w-12 bg-surface border-r border-line flex flex-col items-center py-3 gap-3 transition-all duration-300">
-        <button onClick={toggleSidebar} title="展开侧边栏" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-          <RightOutlined />
-        </button>
-        <button onClick={() => createSession()} title="新建会话" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-          <PlusOutlined />
-        </button>
-      </aside>
+      <>
+        <aside
+          ref={asideRef}
+          style={{ width: SIDEBAR_COLLAPSED_W }}
+          className="hermes-sidebar bg-surface border-r border-line flex-shrink-0 flex flex-col items-center py-3 gap-3 transition-all duration-300"
+        >
+          <button onClick={toggleSidebar} title="展开侧边栏" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+            <RightOutlined />
+          </button>
+          <button onClick={() => setNewSessionOpen(true)} title="新建会话" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+            <PlusOutlined />
+          </button>
+        </aside>
+        {newSessionModal}
+      </>
     )
   }
 
   return (
-    <aside className="w-[340px] bg-surface border-r border-line flex-shrink-0 flex flex-col transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl">
+    <aside
+      ref={asideRef}
+      style={{ width: layout.sidebarWidth }}
+      className={`hermes-sidebar relative bg-surface border-r border-line flex-shrink-0 flex flex-col transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl ${resizing ? 'is-resizing' : ''}`}
+    >
+      {/* 宽度拖拽手柄：贴右边界，悬停/拖动亮出主色竖线，双击恢复默认宽度 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        title="拖动调整侧边栏宽度（双击恢复默认）"
+        className={`hermes-sidebar-resizer ${resizing ? 'is-resizing' : ''}`}
+        onPointerDown={startResizeWidth}
+        onDoubleClick={resetWidth}
+      />
       {/* 头部 */}
       <div className="p-4 flex justify-between items-center">
         <div>
@@ -132,7 +245,7 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
             <div className="flex items-center gap-2">
               <button
                 title="新建会话"
-                onClick={e => { e.stopPropagation(); createSession() }}
+                onClick={e => { e.stopPropagation(); setNewSessionOpen(true) }}
                 className="p-1 rounded hover:bg-canvas text-sm leading-none"
               >
                 <PlusOutlined />
@@ -169,7 +282,19 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
                     }`}
                     onClick={() => switchSession(session.id)}
                   >
-                    <span className="flex-1 truncate text-sm">{session.name}</span>
+                    {/* 只有自选了工作目录的会话才显示第二行：用内置工作区的会话
+                        （绝大多数）保持单行，自选目录才作为差异被标出来 */}
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate text-sm">{session.name}</div>
+                      {session.workDir && (
+                        <Tooltip title={`工作目录：${session.workDir}`}>
+                          <div className="flex items-center gap-1 text-xs text-inkMuted truncate">
+                            <FolderOutlined className="shrink-0" />
+                            <span className="truncate">{workDirLabel(session.workDir)}</span>
+                          </div>
+                        </Tooltip>
+                      )}
+                    </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={e => { e.stopPropagation(); setRenaming(session.id); setRenameValue(session.name) }}
@@ -350,6 +475,8 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
       >
         <Input value={renameValue} onChange={e => setRenameValue(e.target.value)} />
       </Modal>
+
+      {newSessionModal}
     </aside>
   )
 }

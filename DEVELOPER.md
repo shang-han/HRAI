@@ -68,7 +68,7 @@ workspace/
 npm run electron:build
 ```
 
-生成 `release/Hermes人事行政智能专家 Setup 1.0.4.exe`。
+生成 `release/Hermes人事行政智能专家 Setup 1.0.5.exe`。
 注意：完整安装包需要 `resources/hermes/python`、`git`、`site-packages` 均已就绪。
 
 ## macOS 打包
