@@ -58,6 +58,7 @@ export class GiteeUpdater {
   private getConfig: () => UpdateConfig
   private onProgress: ((state: DownloadState) => void) | null = null
   private downloadAbort: AbortController | null = null
+  private lastCheckResult: ReleaseInfo | null = null
 
   constructor(getConfig: () => UpdateConfig) {
     this.getConfig = getConfig
@@ -102,7 +103,7 @@ export class GiteeUpdater {
       signal: AbortSignal.timeout(15000)
     })
     if (resp.status === 404) {
-      return {
+      this.lastCheckResult = {
         hasUpdate: false,
         latestVersion: '',
         currentVersion: app.getVersion(),
@@ -117,6 +118,7 @@ export class GiteeUpdater {
         deltaSize: 0,
         parts: []
       }
+      return this.lastCheckResult
     }
     if (!resp.ok) {
       throw new Error(`检查更新失败：HTTP ${resp.status}`)
@@ -133,7 +135,8 @@ export class GiteeUpdater {
     const exactAsset = assets.find((a: any) => this.isPlatformAsset(String(a.name || '')))
     const firstPart = assets.find((a: any) => this.isPlatformPartAsset(String(a.name || '')))
     const asset = exactAsset || assets[0]
-    const downloadUrl = String(exactAsset?.browser_download_url || release.assets_url || '')
+    // 分卷包时不要用 assets_url 作为下载地址，后续走 parts 合并下载
+    const downloadUrl = exactAsset ? String(exactAsset.browser_download_url || '') : ''
 
     let fileName = String(asset?.name || `Hermes-Setup-${latestVersion}${platformExt}`)
     if (!exactAsset && firstPart) {
@@ -175,7 +178,7 @@ export class GiteeUpdater {
 
     // 预发布版本不视为正式更新（避免已是最新时还弹更新框）
     const isPrerelease = release.prerelease === true
-    return {
+    this.lastCheckResult = {
       hasUpdate: !isPrerelease && !!latestVersion && compareVersions(latestVersion, currentVersion) > 0,
       latestVersion,
       currentVersion,
@@ -190,18 +193,18 @@ export class GiteeUpdater {
       deltaSize,
       parts
     }
+    return this.lastCheckResult
   }
 
   async downloadLatest(): Promise<{ filePath: string; updateType: 'incremental' | 'full' }> {
-    const info = await this.checkForUpdates()
+    const info = this.lastCheckResult?.hasUpdate ? this.lastCheckResult : await this.checkForUpdates()
     if (!info.hasUpdate) {
       throw new Error('当前已经是最新版本')
     }
-    if (!info.downloadUrl) {
+    const incremental = info.updateType === 'incremental' && !!info.deltaUrl
+    if (!incremental && !info.downloadUrl && info.parts.length === 0) {
       throw new Error('没有找到可用的更新包')
     }
-
-    const incremental = info.updateType === 'incremental' && !!info.deltaUrl
     const fileName = incremental ? (info.deltaFileName || `delta-${info.currentVersion}-${info.latestVersion}.zip`) : info.fileName
 
     this.downloadAbort?.abort()
