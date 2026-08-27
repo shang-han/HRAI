@@ -19,6 +19,7 @@ const ThinkingDots: React.FC = () => (
 
 const ChatArea: React.FC = () => {
   const { messages, isLoading } = useSessionStore()
+  const hasMessages = messages.length > 0
   const scrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const lastUserMsgIdRef = useRef<string | null>(null)
@@ -52,7 +53,9 @@ const ChatArea: React.FC = () => {
   }
 
   // 容器高度变化（如输入框被拉伸/压缩）时：若原本贴底则保持贴底，
-  // 否则浏览器保持 scrollTop 不变，底部内容会滑出可视区
+  // 否则浏览器保持 scrollTop 不变，底部内容会滑出可视区。
+  // 依赖必须是 hasMessages 而不是 []：空态那棵树上没有 scrollRef，
+  // 挂载时 current 是 null，只跑一次的话 observer 永远挂不上去。
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -63,7 +66,7 @@ const ChatArea: React.FC = () => {
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [hasMessages])
 
   // 新消息/流式内容更新时：仅在用户位于底部附近时跟随滚动
   useEffect(() => {
@@ -90,18 +93,18 @@ const ChatArea: React.FC = () => {
   }, [messages[0]?.id])
 
   if (messages.length === 0) {
+    // 空态不抢 flex-1：由 App 里的上下弹性占位把「问候语 + 输入框」整体垂直居中。
+    // 允许收缩 + 内部滚动，窗口很矮时问候语自己滚，不会把输入框顶出可视区。
     return (
-      <div className="flex-1 min-h-0 mx-4 bg-canvas rounded-xl overflow-hidden">
-      <div className="h-full overflow-auto p-4 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="text-6xl mb-4">🤖</div>
-          <h2 className="text-xl font-semibold text-ink mb-2">
+      <div className="min-h-0 overflow-y-auto px-4 pt-4 pb-2">
+        <div className="w-full max-w-[820px] mx-auto text-center">
+          <h2 className="hermes-greeting text-[28px] leading-snug font-medium mb-2">
             您好，我是人事行政一体化智能专家
           </h2>
           <p className="text-inkMuted text-sm">
             您可以点击左侧业务菜单快速生成各类表单、制度方案，也可以直接输入您的需求。
           </p>
-          <div className="mt-6 grid grid-cols-2 gap-3 text-left">
+          <div className="mt-7 grid grid-cols-2 gap-3 text-left">
             {[
               '帮我写一份招聘需求提报单',
               '生成员工入职登记表',
@@ -110,7 +113,7 @@ const ChatArea: React.FC = () => {
             ].map((prompt, i) => (
               <div
                 key={i}
-                className="p-3 border border-line rounded-lg text-sm cursor-pointer hover:border-primary hover:text-primary transition-all"
+                className="hermes-suggest-card px-3.5 py-3 text-sm text-inkSecondary"
                 onClick={() => {
                   const event = new CustomEvent('fillInput', { detail: prompt })
                   window.dispatchEvent(event)
@@ -122,20 +125,19 @@ const ChatArea: React.FC = () => {
           </div>
         </div>
       </div>
-      </div>
     )
   }
 
   return (
-    <div className="flex-1 min-h-0 mx-4 bg-canvas rounded-xl overflow-hidden flex flex-col">
+    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       className="flex-1 overflow-auto min-h-0"
     >
       {/* min-h-full + justify-end：内容不满屏时贴在底部（紧挨输入框），满屏后正常滚动 */}
-      {/* 聊天区为内缩的灰色圆角卡片：左右留白，内容在卡片内再留 16px */}
-      <div className="min-h-full flex flex-col justify-end py-4 px-4 space-y-4">
+      {/* 消息列宽度与输入框对齐（都是 max-w-[820px] 居中） */}
+      <div className="min-h-full w-full max-w-[820px] mx-auto flex flex-col justify-end py-4 px-4 space-y-4">
       {messages.map((message) => (
         <div
           key={message.id}
@@ -147,10 +149,10 @@ const ChatArea: React.FC = () => {
             </div>
           )}
           <div
-            className={`max-w-[70%] rounded-xl px-4 py-3 ${
+            className={`max-w-[70%] rounded-2xl px-4 py-3 ${
               message.role === 'user'
-                ? 'bg-primary text-white'
-                : 'bg-surface text-ink'
+                ? 'hermes-glass-primary text-white'
+                : 'hermes-glass text-ink'
             }`}
           >
             {/* 图片展示 */}
@@ -218,8 +220,9 @@ const ChatArea: React.FC = () => {
               <p className="whitespace-pre-wrap">{message.content}</p>
             )}
 
-            {/* 时间戳 */}
-            <div className={`text-xs mt-1 ${message.role === 'user' ? 'text-primaryLight' : 'text-inkMuted'}`}>
+            {/* 时间戳。用户气泡上不能再用 primaryLight：主色玻璃上两者都是浅蓝紫，
+                几乎糊在一起；改半透明白，跟白正文同色系但明确弱一档 */}
+            <div className={`text-xs mt-1 ${message.role === 'user' ? 'text-white/70' : 'text-inkMuted'}`}>
               {new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
               {message.model && ` · ${message.model}`}
             </div>
@@ -233,7 +236,7 @@ const ChatArea: React.FC = () => {
           <div className="w-6 h-6 rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0 mt-1 select-none">
             AI
           </div>
-          <div className="bg-surface rounded-xl px-4 py-3">
+          <div className="hermes-glass rounded-2xl px-4 py-3">
             <div className="flex gap-1">
               <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
               <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />

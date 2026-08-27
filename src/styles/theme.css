@@ -26,6 +26,7 @@
   --color-primary-hover: #6366F1;    /* 主色悬停 */
   --color-primary-light: #818CF8;    /* 主色浅档：深色模式下的文字强调 */
   --color-primary-soft: #eef0fe;     /* 主色淡底：选中项/导航悬停背景 */
+  --color-primary-glow: rgba(79, 70, 229, .32); /* 主色光晕：聚焦投影/发光 */
   --color-accent: #0891B2;           /* 辅助色（青蓝）：分类标题/图标点缀 */
   --color-accent-soft: #e0f4f7;      /* 辅助色淡底 */
   --color-danger: #F53F3F;           /* 危险/删除 */
@@ -45,6 +46,28 @@
 
   /* 滚动条 */
   --color-scrollbar: #c3cad6;
+
+  /* 聊天区底色渐变：中心偏亮，向外渗浅蓝，把镂空输入框托起来 */
+  --gradient-chat: radial-gradient(
+    135% 95% at 50% 38%,
+    #ffffff 0%,
+    #f5f9fe 32%,
+    #e4eefc 70%,
+    #d5e5fb 100%
+  );
+  /* 镂空/玻璃材质：浮在 --gradient-chat 上的所有面统一取这几档 */
+  --fill-glass: rgba(255, 255, 255, .58);         /* 常态：输入框、推荐卡、嵌套块 */
+  --fill-glass-strong: rgba(255, 255, 255, .78);  /* 激活/悬停/浮层 */
+  --fill-glass-raised: rgba(255, 255, 255, .72);  /* 气泡：需要比输入框更明确的边界 */
+  /* 用户气泡的主色玻璃。85% 不是随手取的：这是白字对比度还能到 4.7:1 的临界点，
+     再透一档（.72）就掉到 3.7:1，正文不合格。 */
+  --fill-glass-primary: rgba(79, 70, 229, .85);
+  /* 玻璃描边。浅色下不能用"白色高光边"那套：渐变中心本来就接近纯白，
+     白边 + 白填充 + 白底叠在一起等于没有边界，气泡只剩一点投影，糊成一片。
+     浅色用极淡的深色发丝线，深色才用白色高光边（那边背板是暗的，白边才立得住）。 */
+  --glass-line: rgba(15, 23, 42, .08);
+  --glass-line-primary: rgba(255, 255, 255, .28); /* 主色玻璃填充够暗，白高光边成立 */
+  --shadow-glass: rgba(15, 23, 42, .16);
 }
 
 /* ---------- 颜色变量 · 深色模式 ---------- */
@@ -53,6 +76,7 @@
   --color-primary-hover: #818CF8;
   --color-primary-light: #a5b4fc;
   --color-primary-soft: #232a52;
+  --color-primary-glow: rgba(99, 102, 241, .42);
   --color-accent: #22D3EE;
   --color-accent-soft: #0e2a30;
 
@@ -66,6 +90,21 @@
   --color-ink-muted: #9ca3af;
 
   --color-scrollbar: #3d4859;
+
+  --gradient-chat: radial-gradient(
+    135% 95% at 50% 38%,
+    #1d2739 0%,
+    #161f2e 34%,
+    #0f1521 72%,
+    #0b0e15 100%
+  );
+  --fill-glass: rgba(255, 255, 255, .06);
+  --fill-glass-strong: rgba(255, 255, 255, .1);
+  --fill-glass-raised: rgba(255, 255, 255, .09);
+  --fill-glass-primary: rgba(99, 102, 241, .78);
+  --glass-line: rgba(255, 255, 255, .12);
+  --glass-line-primary: rgba(255, 255, 255, .22);
+  --shadow-glass: rgba(0, 0, 0, .55);
 }
 
 /* ---------- 通用样式 ---------- */
@@ -125,6 +164,294 @@
 .message-enter {
   animation: fadeIn 0.3s ease-out;
 }
+
+/* ---------- 玻璃材质（浮在渐变底上的所有面共用） ----------
+   刻意不用 backdrop-filter：气泡背后就是一层平滑渐变，模糊平滑渐变
+   等于没模糊；而一屏几十上百个 backdrop-filter 层会实打实拖垮滚动帧率
+   （每层都要重采样背板）。半透明填充 + 高光边 + 投影已经足够"玻璃"，
+   且全部是纯绘制，零合成开销。                                        */
+
+/* 气泡、卡片：主要的抬起面 */
+.hermes-glass {
+  background: var(--fill-glass-raised);
+  border: 1px solid var(--glass-line);
+  box-shadow: 0 2px 10px -4px var(--shadow-glass);
+}
+
+/* 嵌套块、附件小标签：不该抢主面的层次，不加投影 */
+.hermes-glass-subtle {
+  background: var(--fill-glass);
+  border: 1px solid var(--glass-line);
+}
+
+/* 用户气泡：主色玻璃 */
+.hermes-glass-primary {
+  background: var(--fill-glass-primary);
+  border: 1px solid var(--glass-line-primary);
+  box-shadow: 0 2px 10px -4px var(--shadow-glass);
+}
+
+/* 浮层（斜杠命令菜单等）：填充更实、投影更重，压住底下的内容 */
+.hermes-glass-pop {
+  background: var(--fill-glass-strong);
+  border: 1px solid var(--glass-line);
+  box-shadow: 0 10px 30px -8px var(--shadow-glass);
+}
+
+/* 玻璃面上的小图标按钮：悬停用主色淡底，
+   不能沿用 dark:bg-canvas —— 深色下 canvas 是近黑，在玻璃上是一块硬补丁 */
+.hermes-icon-btn {
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  transition: background .2s ease, color .2s ease;
+}
+.hermes-icon-btn:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* ---------- 聊天输入框：动态渐变描边 + 呼吸光晕 ----------
+   DOM 结构见 src/components/InputArea.tsx：
+     .hermes-input-wrap        定位锚点，:focus-within / .is-busy 驱动全部激活态
+       .hermes-input-glow      框体背后的柔光，常驻淡光 → 激活时呼吸
+       .hermes-input-shell     1.5px 描边环（静态线色，激活时渐变光带流转）
+         .hermes-input-body    不透明内层，盖住渐变中心，只露出边缘一圈
+   激活条件 = 输入框内任意元素获得焦点，或 AI 正在生成（.is-busy）。
+   配色只取 --color-primary / --color-accent，深浅色自动跟随变量。      */
+
+/* 注册自定义属性：未注册的 CSS 变量不参与动画插值，
+   registered property 才能让 conic-gradient 的起始角被逐帧过渡。 */
+@property --hermes-ring-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes hermes-ring-spin {
+  to { --hermes-ring-angle: 360deg; }
+}
+
+@keyframes hermes-glow-breathe {
+  0%, 100% { opacity: .3; transform: scale(.97); }
+  50%      { opacity: .7; transform: scale(1.02); }
+}
+
+.hermes-input-wrap {
+  position: relative;
+}
+
+/* 背后柔光：常驻一层极淡的环境光，把输入框从同色背景上"托"起来；
+   激活时提亮并呼吸。只动 opacity / transform，模糊结果由合成层纹理缓存，
+   不会每帧重算 blur。 */
+.hermes-input-glow {
+  position: absolute;
+  inset: -8px -4px -12px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--color-primary) 0%,
+    var(--color-accent) 50%,
+    var(--color-primary-light) 100%
+  );
+  filter: blur(18px);
+  opacity: .16;
+  pointer-events: none;
+  will-change: opacity, transform;
+  transition: opacity .4s ease;
+}
+.dark .hermes-input-glow {
+  opacity: .22;
+}
+.hermes-input-wrap:focus-within .hermes-input-glow,
+.hermes-input-wrap.is-busy .hermes-input-glow {
+  animation: hermes-glow-breathe 3s ease-in-out infinite;
+}
+
+/* 描边环：::before 画流转光带，::after 画未激活时的静态细边。
+   两者都要 z-index: 1 盖在 .hermes-input-body 之上——body 现在是半透明的，
+   跟 shell 同半径同尺寸，不抬高的话边缘那一圈会被 body 压住看不见。 */
+.hermes-input-shell {
+  position: relative;
+  border-radius: 26px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 10px 28px -12px rgba(15, 23, 42, .16);
+  transition: box-shadow .3s ease;
+}
+.dark .hermes-input-shell {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px -12px rgba(0, 0, 0, .65);
+}
+.hermes-input-shell:focus-within,
+.hermes-input-wrap.is-busy .hermes-input-shell {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 14px 34px -12px var(--color-primary-glow);
+}
+
+/* 静态细边：激活时淡出，交给流转光带 */
+.hermes-input-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  border: 1px solid var(--color-line);
+  opacity: 1;
+  transition: opacity .35s ease;
+  pointer-events: none;
+}
+.hermes-input-shell:focus-within::after,
+.hermes-input-wrap.is-busy .hermes-input-shell::after {
+  opacity: 0;
+}
+
+/* 流转光带：conic-gradient 铺满，再用双层 mask + xor 把中心挖掉，只剩 1.5px 的环。
+   输入框是镂空的（body 半透明），所以中心必须真的透明——
+   否则整块彩色渐变会从半透明的 body 里透出来，整个框变成花的。
+   box-sizing 全局是 border-box：inset:0 + padding:1.5px 时 content-box 正好内缩 1.5px，
+   两层 mask 异或后只有那一圈 padding 区域不透明。 */
+.hermes-input-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--hermes-ring-angle),
+    transparent 0deg,
+    var(--color-primary) 55deg,
+    var(--color-accent) 120deg,
+    var(--color-primary-light) 175deg,
+    transparent 240deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity .35s ease;
+  pointer-events: none;
+}
+.hermes-input-shell:focus-within::before,
+.hermes-input-wrap.is-busy .hermes-input-shell::before {
+  opacity: 1;
+  animation: hermes-ring-spin 2.6s linear infinite;
+}
+/* 生成中转得更快，和"仅聚焦"区分开，当作回合进行中的状态指示 */
+.hermes-input-wrap.is-busy .hermes-input-shell::before {
+  animation-duration: 1.4s;
+}
+
+/* 镂空内层：半透明填充，底下的浅蓝渐变直接透上来 */
+.hermes-input-body {
+  position: relative;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--fill-glass);
+  overflow: hidden;
+  transition: background .3s ease;
+}
+.hermes-input-shell:focus-within .hermes-input-body,
+.hermes-input-wrap.is-busy .hermes-input-body {
+  background: var(--fill-glass-strong);
+}
+
+/* 发送按钮：无内容时是灰色小圆，有内容时展开成渐变胶囊 */
+.hermes-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--color-surface-subtle);
+  color: var(--color-ink-muted);
+  cursor: default;
+  transition: width .28s cubic-bezier(.4, 0, .2, 1), background .28s ease,
+              color .28s ease, box-shadow .28s ease, transform .15s ease;
+}
+.dark .hermes-send-btn {
+  background: var(--color-line);
+}
+.hermes-send-btn.is-ready {
+  width: 48px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 3px 10px -3px var(--color-primary);
+}
+.hermes-send-btn.is-ready:hover {
+  transform: translateY(-1px);
+}
+.hermes-send-btn.is-ready:active {
+  transform: scale(.94);
+}
+
+/* 输入框高度拖动手柄 */
+.hermes-resize-grip {
+  width: 40px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-line);
+  transition: background .2s ease, width .2s ease;
+}
+.hermes-resize-handle:hover .hermes-resize-grip,
+.hermes-resize-handle.is-resizing .hermes-resize-grip {
+  width: 56px;
+  background: var(--color-primary);
+}
+
+/* 无障碍：系统开启"减弱动效"时只保留静态渐变，不再持续运动 */
+@media (prefers-reduced-motion: reduce) {
+  .hermes-input-shell::before,
+  .hermes-input-glow {
+    animation: none !important;
+  }
+  .hermes-send-btn {
+    transition-duration: .01ms !important;
+  }
+}
+
+/* ---------- 聊天区（消息 + 输入框所在的整块区域） ---------- */
+
+/* 浅蓝渐变底：镂空输入框、消息气泡都浮在它上面 */
+.hermes-chat-canvas {
+  background: var(--gradient-chat);
+}
+
+/* 空态大标题：主色 → 辅助色渐变文字（Gemini 那种问候语观感） */
+.hermes-greeting {
+  background: linear-gradient(
+    96deg,
+    var(--color-primary) 0%,
+    var(--color-accent) 52%,
+    var(--color-primary-light) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* 空态推荐卡：和气泡同一套玻璃语言（半透明填充 + 发丝边 + 浅投影），悬停提亮
+   （不用 Tailwind 的 bg-surface/60：语义色 token 是 hex 变量，
+     /opacity 修饰符会编译成 rgb(var(--x) / .6) 直接失效） */
+.hermes-suggest-card {
+  border: 1px solid var(--glass-line);
+  border-radius: 14px;
+  background: var(--fill-glass);
+  box-shadow: 0 2px 10px -4px var(--shadow-glass);
+  cursor: pointer;
+  transition: background .2s ease, border-color .2s ease, color .2s ease,
+              transform .2s ease, box-shadow .2s ease;
+}
+.hermes-suggest-card:hover {
+  background: var(--fill-glass-strong);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -8px var(--color-primary-glow);
+}
+
 
 /* 外部链接警告样式 */
 .external-link {
