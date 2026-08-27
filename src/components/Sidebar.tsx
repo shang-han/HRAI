@@ -8,7 +8,6 @@ import {
   SIDEBAR_DEFAULT_W,
   SIDEBAR_COLLAPSED_W
 } from '../store/configStore'
-import SchedulePanel from './SchedulePanel'
 import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
 import { Modal, Input, Button, Tooltip } from 'antd'
 import {
@@ -18,6 +17,7 @@ import {
   LockOutlined,
   SearchOutlined,
   MessageOutlined,
+  BellOutlined,
   BookOutlined,
   ApartmentOutlined,
   StarOutlined,
@@ -25,10 +25,11 @@ import {
   RightOutlined,
   FolderOutlined,
   CaretDownOutlined,
-  CaretRightOutlined
+  CaretRightOutlined,
+  SettingOutlined
 } from '@ant-design/icons'
 
-const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }> = ({ onOpenWork, onOpenTemplates }) => {
+const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; onOpenSchedules: () => void }> = ({ onOpenWork, onOpenTemplates, onOpenSchedules }) => {
   const { sessions, activeSessionId, createSession, deleteSession, switchSession, renameSession } = useSessionStore()
   const { layout, toggleSidebar, setSidebarWidth } = useConfigStore()
   const [searchText, setSearchText] = useState('')
@@ -142,6 +143,12 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
   // 改动菜单结构只需维护那份数据文件
   const businessNav = HR_MENU
 
+  // 底部固定「设置」入口：点击直接打开统一设置面板（TopBar 监听 open-settings 事件），
+  // 页面切换在面板左侧导航里进行
+  const openSettings = () => {
+    window.dispatchEvent(new CustomEvent('open-settings'))
+  }
+
   // 新建会话弹窗在收起态也要能弹出来（收起态的 "+" 是唯一入口），
   // 所以两个分支各自渲染一次，而不是只挂在展开态那棵树上
   const newSessionModal = (
@@ -167,6 +174,9 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
           </button>
           <button onClick={() => setNewSessionOpen(true)} title="新建会话" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
             <PlusOutlined />
+          </button>
+          <button onClick={openSettings} title="设置" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+            <SettingOutlined />
           </button>
         </aside>
         {newSessionModal}
@@ -290,7 +300,16 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
           </div>
         </div>
 
-        <SchedulePanel />
+        {/* 定时提醒/任务：点击整行直接右侧打开（无展开收起），与公共预设指令库同模式 */}
+        <div
+          className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle cursor-pointer hover:bg-primarySoft transition-colors"
+          onClick={onOpenSchedules}
+          title="在右侧打开定时提醒/任务管理页"
+        >
+          <div className="p-3 bg-primarySoft flex justify-between items-center">
+            <span><BellOutlined /> 定时提醒/任务</span>
+          </div>
+        </div>
 
         {/* 近期重点工作 */}
         <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
@@ -410,6 +429,17 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void }>
             <span><StarOutlined /> 公共预设指令库</span>
           </div>
         </div>
+      </div>
+
+      {/* 底部固定「设置」入口：点击直接打开统一设置面板 */}
+      <div className="shrink-0 p-2">
+        <button
+          onClick={openSettings}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-inkSecondary hover:bg-primarySoft hover:text-primary transition-colors"
+        >
+          <SettingOutlined />
+          <span>设置</span>
+        </button>
       </div>
 
       {/* 删除确认弹窗 */}

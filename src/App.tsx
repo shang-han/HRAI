@@ -12,13 +12,14 @@ import OfflineBar from './components/OfflineBar'
 import HermesStatusBar from './components/HermesStatusBar'
 import WorkPriorityView from './components/WorkPriorityView'
 import TemplateManagerView from './components/TemplateManagerView'
+import ScheduleView from './components/ScheduleView'
 
 const App: React.FC = () => {
   const [activated, setActivated] = useState<boolean | null>(null)
   const [onboarding, setOnboarding] = useState<boolean | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
-  // 右侧主区域视图：chat=聊天 / work=近期重点工作页 / templates=预设指令库管理页
-  const [mainView, setMainView] = useState<'chat' | 'work' | 'templates'>('chat')
+  // 右侧主区域视图：chat=聊天 / work=近期重点工作页 / templates=预设指令库管理页 / schedules=定时提醒任务页
+  const [mainView, setMainView] = useState<'chat' | 'work' | 'templates' | 'schedules'>('chat')
   // 指令库只读模式：输入框入口只能点选填入；编辑/新建只能从侧边栏入口进入
   const [templatesReadonly, setTemplatesReadonly] = useState(false)
   const themeMode = useConfigStore(state => state.theme)
@@ -175,6 +176,7 @@ const App: React.FC = () => {
             setTemplatesReadonly(false)
             setMainView('templates')
           }}
+          onOpenSchedules={() => setMainView('schedules')}
         />
 
         {/* 右侧主区域 */}
@@ -183,6 +185,8 @@ const App: React.FC = () => {
             <WorkPriorityView onBack={() => setMainView('chat')} />
           ) : mainView === 'templates' ? (
             <TemplateManagerView readonly={templatesReadonly} onBack={() => setMainView('chat')} />
+          ) : mainView === 'schedules' ? (
+            <ScheduleView onBack={() => setMainView('chat')} />
           ) : (
             <>
               {/* Hermes 内核状态警告条（仅会话页面顶部，黄色，未运行时显示） */}

@@ -7,13 +7,15 @@ import path from 'path'
  * 样式文件变更时不做 HMR 注入，直接整页重载：
  * Electron 的窗口拖拽区（-webkit-app-region）在样式热更后
  * 会失效（拖不动窗口），整页重载才能恢复。
- * 仅影响开发模式，不影响打包产物。
+ * 注意：只 return [] 会被 vite 当作"已处理"静默吞掉，页面不会更新；
+ * 必须主动下发 full-reload 才能真正自动刷新。仅影响开发模式。
  */
 function fullReloadOnStyleChange(): Plugin {
   return {
     name: 'full-reload-on-style-change',
     handleHotUpdate(ctx) {
       if (/\.css$/.test(ctx.file)) {
+        ctx.server.ws.send({ type: 'full-reload' })
         return []
       }
     }

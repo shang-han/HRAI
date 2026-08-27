@@ -36,6 +36,8 @@ interface ConfigState {
   setTheme: (theme: 'light' | 'dark') => void
   setModelConfig: (type: string, providers: ModelProvider[]) => void
   setSelectedModel: (type: string, id: string) => void
+  /** 清除输入框手动选择，恢复"跟随配置页默认/首个启用" */
+  clearSelectedModel: (type: string) => void
   setShortcut: (key: string, value: string) => void
   toggleSidebar: () => void
   /**
@@ -112,6 +114,14 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   // 输入框选择模型：只更新 selectedModels，不回写模型配置的"默认"（isPrimary）
   setSelectedModel: async (type, id) => {
     const selectedModels = { ...get().selectedModels, [type]: id }
+    set({ selectedModels })
+    await window.electronAPI.config.set('selectedModels', selectedModels)
+  },
+
+  // 清除输入框手动选择：删除该模态的记录，之后路由回落到配置页默认/首个启用
+  clearSelectedModel: async (type) => {
+    const selectedModels = { ...get().selectedModels }
+    delete selectedModels[type as keyof typeof selectedModels]
     set({ selectedModels })
     await window.electronAPI.config.set('selectedModels', selectedModels)
   },

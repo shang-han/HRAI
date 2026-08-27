@@ -236,7 +236,9 @@ export class GiteeUpdater {
     }
 
     const url = incremental ? info.deltaUrl : info.downloadUrl
-    await this.downloadToFile(url, filePath, info.size, 0, info.size)
+    // 增量包按自身大小报进度：否则总量用全量包大小，进度条走到百分之几就完成
+    const total = incremental ? (info.deltaSize || info.size) : info.size
+    await this.downloadToFile(url, filePath, total, 0, total)
     return { filePath, updateType: incremental ? 'incremental' : 'full' }
   }
 

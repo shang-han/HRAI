@@ -50,7 +50,7 @@ const InputArea: React.FC = () => {
   const [commands, setCommands] = useState<any[]>(FALLBACK_COMMANDS)
   const [commandIndex, setCommandIndex] = useState(0)
   const { sendMessage, isLoading, pendingMessages, activeSessionId } = useSessionStore()
-  const { modelConfig, selectedModels, setSelectedModel } = useConfigStore()
+  const { modelConfig, selectedModels, setSelectedModel, clearSelectedModel } = useConfigStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -96,30 +96,48 @@ const InputArea: React.FC = () => {
 
   const modelMenuItems: MenuProps['items'] = (['dialogue', 'image', 'video', 'multimodal'] as const).map(type => {
     const enabled = (modelConfig as any)[type].filter((m: any) => m.enabled)
+    const children: any[] = []
+    // 对话模型：手动选过之后优先级高于配置页默认，这里提供一键回到"跟随默认"
+    if (type === 'dialogue' && enabled.length > 0) {
+      children.push(
+        {
+          key: 'dialogue-follow-default',
+          label: (
+            <span className="flex items-center gap-2">
+              <span>跟随默认</span>
+              {!selectedModels.dialogue && <CheckOutlined className="text-primary text-xs" />}
+            </span>
+          ),
+          onClick: () => clearSelectedModel('dialogue')
+        },
+        { type: 'divider' }
+      )
+    }
+    children.push(...(enabled.length > 0
+      ? enabled.map((m: any) => ({
+          key: m.id,
+          label: (
+            <span className="flex items-center gap-2">
+              {/* 模型名称为主，服务商灰色小字附带 */}
+              <span>{m.modelName || m.name}</span>
+              <span className="text-inkMuted text-[10px]">
+                {m.provider || (m.name || '').split(' · ')[0]}
+              </span>
+              {/* 勾选 = 该模态下输入框选中的模型（对话与按钮显示一致） */}
+              {(type === 'dialogue'
+                ? selectedDialogue?.id === m.id
+                : selectedModels[type as keyof typeof selectedModels] === m.id) && (
+                <CheckOutlined className="text-primary text-xs" />
+              )}
+            </span>
+          ),
+          onClick: () => handleModelChange(type, m.id, m.name || m.modelName, m.modelName || m.name)
+        }))
+      : [{ key: `${type}-empty`, label: '暂无已启用模型', disabled: true }]))
     return {
       key: type,
       label: MODALITY_LABELS[type],
-      children: enabled.length > 0
-        ? enabled.map((m: any) => ({
-            key: m.id,
-            label: (
-              <span className="flex items-center gap-2">
-                {/* 模型名称为主，服务商灰色小字附带 */}
-                <span>{m.modelName || m.name}</span>
-                <span className="text-inkMuted text-[10px]">
-                  {m.provider || (m.name || '').split(' · ')[0]}
-                </span>
-                {/* 勾选 = 该模态下输入框选中的模型（对话与按钮显示一致） */}
-                {(type === 'dialogue'
-                  ? selectedDialogue?.id === m.id
-                  : selectedModels[type as keyof typeof selectedModels] === m.id) && (
-                  <CheckOutlined className="text-primary text-xs" />
-                )}
-              </span>
-            ),
-            onClick: () => handleModelChange(type, m.id, m.name || m.modelName, m.modelName || m.name)
-          }))
-        : [{ key: `${type}-empty`, label: '暂无已启用模型', disabled: true }]
+      children
     }
   })
 
@@ -561,23 +579,18 @@ const InputArea: React.FC = () => {
                     <DownOutlined className="text-[10px] shrink-0" />
                   </button>
                 </Dropdown>
-                {isLoading && (
-                  <Button
-                    type="primary"
-                    danger
-                    shape="circle"
-                    icon={<StopOutlined />}
-                    onClick={handleStop}
-                    title="停止"
-                  />
-                )}
+                {/* 发送/停止同按钮：图标左右滑动切换（发送⇄停止），
+                    is-stop 时底色同步变红 */}
                 <button
-                  onClick={handleSend}
-                  disabled={!canSend}
-                  title={canSend ? '发送（Enter）' : '请先输入内容'}
-                  className={`hermes-send-btn ${canSend ? 'is-ready' : ''}`}
+                  onClick={isLoading ? handleStop : handleSend}
+                  disabled={!isLoading && !canSend}
+                  title={isLoading ? '停止' : canSend ? '发送（Enter）' : '请先输入内容'}
+                  className={`hermes-send-btn ${isLoading || canSend ? 'is-ready' : ''} ${isLoading ? 'is-stop' : ''}`}
                 >
-                  <SendOutlined className="text-sm" />
+                  <span className="hermes-icon-stage text-sm">
+                    <SendOutlined className="hermes-icon hermes-icon-send" />
+                    <StopOutlined className="hermes-icon hermes-icon-stop" />
+                  </span>
                 </button>
               </div>
             </div>

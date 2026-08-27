@@ -439,6 +439,45 @@ body.hermes-col-resizing * {
 .hermes-send-btn.is-ready:active {
   transform: scale(.94);
 }
+/* 停止态：发送中同位置变成红色停止按钮 */
+.hermes-send-btn.is-stop {
+  background: linear-gradient(135deg, #f87171, #ef4444);
+  box-shadow: 0 3px 10px -3px rgba(239, 68, 68, .55);
+}
+/* 发送⇄停止图标滑动切换：两个图标叠放，随 is-stop 左右滑动 + 淡入淡出。
+   发送：发送图标向左滑出、停止图标从右滑入；
+   停止：停止图标向右滑出、发送图标从左滑入（即"同时向右移出现发送图标"）。 */
+.hermes-send-btn {
+  position: relative;
+  overflow: hidden;
+}
+.hermes-icon-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hermes-icon {
+  position: absolute;
+  transition: transform .3s cubic-bezier(.4, 0, .2, 1), opacity .3s ease;
+}
+.hermes-icon-send {
+  transform: translateX(0);
+  opacity: 1;
+}
+.hermes-icon-stop {
+  transform: translateX(24px);
+  opacity: 0;
+}
+.hermes-send-btn.is-stop .hermes-icon-send {
+  transform: translateX(-24px);
+  opacity: 0;
+}
+.hermes-send-btn.is-stop .hermes-icon-stop {
+  transform: translateX(0);
+  opacity: 1;
+}
 
 /* 输入框高度拖动手柄 */
 .hermes-resize-handle {
@@ -757,4 +796,18 @@ body.hermes-col-resizing * {
   padding-left: 1rem;
   margin: 0.75rem 0;
   color: var(--color-ink-muted);
+}
+
+/* 设置面板 tab 页：tab 栏固定在上方，内容区独立滚动。
+   滚动条只出现在 tab 下方，不会贯穿到面板顶部（避免与右上角关闭按钮重叠）。 */
+.hermes-tabs-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.hermes-tabs-fill .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px; /* 给滚动条留出间隙 */
 }

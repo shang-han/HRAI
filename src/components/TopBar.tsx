@@ -3,12 +3,14 @@ import { useConfigStore } from '../store/configStore'
 import { useSessionStore } from '../store/sessionStore'
 import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
 import ContextMeter from './ContextMeter'
-import { App as AntApp, Button, Tooltip, Badge, Modal, Drawer, Tabs, Form, Input, Switch, Select, Alert, Card, Radio, Space, Tag, InputNumber, Slider, Popconfirm, Empty, Divider } from 'antd'
+import { App as AntApp, Button, Tooltip, Modal, Tabs, Form, Input, Switch, Select, Alert, Card, Radio, Space, Tag, InputNumber, Slider, Popconfirm, Empty, Divider } from 'antd'
 import {
   SettingOutlined,
   MoonOutlined,
   SunOutlined,
   BellOutlined,
+  BgColorsOutlined,
+  InfoCircleOutlined,
   ApiOutlined,
   LinkOutlined,
   QuestionCircleOutlined,
@@ -20,7 +22,8 @@ import {
   PlusOutlined,
   DeleteOutlined,
   CheckCircleFilled,
-  CloseCircleFilled
+  CloseCircleFilled,
+  CloseOutlined
 } from '@ant-design/icons'
 
 type ModelType = 'dialogue' | 'image' | 'video' | 'multimodal'
@@ -65,13 +68,13 @@ const TopBar: React.FC = () => {
   const { theme, setTheme, modelConfig, setModelConfig, layout, toggleSidebar } = useConfigStore()
   const { sessions, activeSessionId, setSessionWorkDir } = useSessionStore()
   const { message } = AntApp.useApp()
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [modelConfigOpen, setModelConfigOpen] = useState(false)
-  const [channelConfigOpen, setChannelConfigOpen] = useState(false)
+  // 统一设置面板：侧边栏底部「设置」是唯一入口，每次打开都落在模型接入页；
+  // tab 页通过 hermes-tabs-fill 让内容区独立滚动
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
+  const [settingsPage, setSettingsPage] = useState('models')
   const [announcementOpen, setAnnouncementOpen] = useState(false)
   const [announcementContent, setAnnouncementContent] = useState('')
   const [hasNewAnnouncement, setHasNewAnnouncement] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
   const [permissionMode, setPermissionMode] = useState<'ask' | 'auto' | 'readonly'>('ask')
   const [permissionRequest, setPermissionRequest] = useState<any>(null)
   const [updateOwner, setUpdateOwner] = useState('')
@@ -81,8 +84,10 @@ const TopBar: React.FC = () => {
   const [updateModalOpen, setUpdateModalOpen] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
-  // 模型配置抽屉当前激活的标签页（footer 保存按钮按此触发对应类型的保存）
+  // 模型配置当前激活的标签页（底部保存按钮按此触发对应类型的保存）
   const [modelTabKey, setModelTabKey] = useState('dialogue')
+  // 渠道接入当前激活的标签页（底部保存按钮按此触发对应渠道的保存）
+  const [channelTabKey, setChannelTabKey] = useState('weixin')
   const [workDirOpen, setWorkDirOpen] = useState(false)
   // 内置工作区的绝对路径，仅用于胶囊 Tooltip 展示"AI 实际在哪干活"
   const [builtinWorkDir, setBuiltinWorkDir] = useState('')
@@ -133,6 +138,17 @@ const TopBar: React.FC = () => {
     // 监听更新下载进度
     const offUpdate = window.electronAPI.update.onProgress((data) => setUpdateProgress(data))
     return () => { offPermission(); offUpdate() }
+  }, [])
+
+  // 菜单栏「设置」各页点击 → 打开统一设置面板并定位到对应页
+  useEffect(() => {
+    const h = () => {
+      // 每次打开都回到模型接入页，不在上次停留的页面
+      setSettingsPage('models')
+      setSettingsPanelOpen(true)
+    }
+    window.addEventListener('open-settings', h)
+    return () => window.removeEventListener('open-settings', h)
   }, [])
 
   const checkAnnouncement = async () => {
@@ -205,16 +221,6 @@ const TopBar: React.FC = () => {
     return () => { mounted = false }
   }, [])
 
-  const handleThemeToggle = () => {
-    setTheme(theme === 'light' ? 'dark' : 'light')
-  }
-
-  const handleAnnouncementRead = () => {
-    setAnnouncementOpen(false)
-    setHasNewAnnouncement(false)
-    window.electronAPI.announcement.markRead()
-  }
-
   return (
     <>
       <div className="h-12 flex items-center justify-between px-4 bg-surface">
@@ -253,34 +259,7 @@ const TopBar: React.FC = () => {
           {/* 上下文占用率：只有内核报过窗口长度才会渲染，没数据时组件自己返回 null */}
           {activeSessionId && <ContextMeter sessionId={activeSessionId} />}
         </div>
-        <div className="flex gap-2 items-center">
-          <Tooltip title="模型配置">
-            <Button size="small" icon={<ApiOutlined />} onClick={() => setModelConfigOpen(true)}>
-              模型
-            </Button>
-          </Tooltip>
-          <Tooltip title="渠道接入">
-            <Button size="small" icon={<LinkOutlined />} onClick={() => setChannelConfigOpen(true)}>
-              渠道
-            </Button>
-          </Tooltip>
-          <Tooltip title="系统设置">
-            <Button size="small" icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
-              设置
-            </Button>
-          </Tooltip>
-          <Tooltip title="使用帮助">
-            <Button size="small" icon={<QuestionCircleOutlined />} onClick={() => setHelpOpen(true)} />
-          </Tooltip>
-          <Badge dot={hasNewAnnouncement} offset={[-4, 4]}>
-            <Tooltip title="系统公告">
-              <Button size="small" icon={<BellOutlined />} onClick={() => { setAnnouncementOpen(true); handleAnnouncementRead() }} />
-            </Tooltip>
-          </Badge>
-          <Tooltip title={theme === 'light' ? '切换深色模式' : '切换浅色模式'}>
-            <Button size="small" icon={theme === 'light' ? <MoonOutlined /> : <SunOutlined />} onClick={handleThemeToggle} />
-          </Tooltip>
-        </div>
+        {/* 模型/渠道/设置/帮助/公告/主题已统一收进菜单栏「设置」，此处不再重复放按钮 */}
       </div>
 
       {/* 会话工作目录弹窗（修改已有会话） */}
@@ -293,110 +272,269 @@ const TopBar: React.FC = () => {
         onSubmit={handleWorkDirSubmit}
       />
 
-      {/* 模型配置抽屉 */}
-      <Drawer
-        title="模型接入配置"
-        open={modelConfigOpen}
-        onClose={() => setModelConfigOpen(false)}
-        width={720}
+      {/* 统一设置面板：菜单栏「设置」的唯一出口，左侧导航 + 右侧内容（参考 WorkBuddy） */}
+      <Modal
+        title={null}
+        closable={false}
+        open={settingsPanelOpen}
+        onCancel={() => setSettingsPanelOpen(false)}
+        width={1100}
+        footer={null}
         destroyOnClose
-        footer={
-          <Button
-            type="primary"
-            block
-            onClick={() => window.dispatchEvent(new CustomEvent('model-config-save', { detail: modelTabKey }))}
-          >
-            保存配置
-          </Button>
-        }
+        styles={{ content: { padding: 0 }, body: { padding: 0 } }}
       >
-        <Tabs
-          activeKey={modelTabKey}
-          onChange={setModelTabKey}
-          items={[
-            { key: 'dialogue', label: '对话模型', children: <ModelConfigSection type="dialogue" providers={modelConfig.dialogue} onSave={(p) => { setModelConfig('dialogue', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
-            { key: 'image', label: '图片模型', children: <ModelConfigSection type="image" providers={modelConfig.image} onSave={(p) => { setModelConfig('image', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
-            { key: 'video', label: '视频模型', children: <ModelConfigSection type="video" providers={modelConfig.video} onSave={(p) => { setModelConfig('video', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
-            { key: 'multimodal', label: '多模态模型', children: <ModelConfigSection type="multimodal" providers={modelConfig.multimodal} onSave={(p) => { setModelConfig('multimodal', p); setTimeout(() => setModelConfigOpen(false), 600) }} /> },
-          ]}
-        />
-      </Drawer>
-
-      {/* 渠道接入抽屉 */}
-      <Drawer title="渠道接入设置" open={channelConfigOpen} onClose={() => setChannelConfigOpen(false)} width={560}>
-        <Tabs items={[
-          { key: 'weixin', label: '个人微信', children: <ChannelConfigSection channel="weixin" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
-          { key: 'wecom', label: '企业微信', children: <ChannelConfigSection channel="wecom" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
-          { key: 'dingtalk', label: '钉钉', children: <ChannelConfigSection channel="dingtalk" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
-          { key: 'feishu', label: '飞书', children: <ChannelConfigSection channel="feishu" onSaved={() => setTimeout(() => setChannelConfigOpen(false), 600)} /> },
-        ]} />
-      </Drawer>
-
-      {/* 系统设置抽屉 */}
-      <Drawer title="系统设置" open={settingsOpen} onClose={() => setSettingsOpen(false)} width={500}>
-        <div className="space-y-4">
-          <div>
-            <h3 className="font-medium mb-2">日志级别</h3>
-            <Select defaultValue="info" style={{ width: 200 }} onChange={(v) => window.electronAPI.log.setLevel(v)}>
-              <Select.Option value="debug">DEBUG</Select.Option>
-              <Select.Option value="info">INFO</Select.Option>
-              <Select.Option value="warn">WARN</Select.Option>
-              <Select.Option value="error">ERROR</Select.Option>
-            </Select>
+        <div className="flex h-[700px] rounded-lg overflow-hidden">
+          {/* 左侧导航 */}
+          <div className="w-44 shrink-0 border-r border-line bg-surfaceSubtle dark:bg-canvas p-3 space-y-1 overflow-y-auto">
+            {[
+              { key: 'models', icon: <ApiOutlined />, label: '模型接入' },
+              { key: 'channels', icon: <LinkOutlined />, label: '渠道接入' },
+              { key: 'theme', icon: <BgColorsOutlined />, label: '主题' },
+              { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
+              { key: 'announcement', icon: <BellOutlined />, label: '系统公告' },
+              { key: 'help', icon: <QuestionCircleOutlined />, label: '使用帮助' },
+              { key: 'about', icon: <InfoCircleOutlined />, label: '关于我们' }
+            ].map(item => (
+              <button
+                key={item.key}
+                onClick={() => setSettingsPage(item.key)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  settingsPage === item.key
+                    ? 'bg-primarySoft text-primary font-medium'
+                    : 'text-inkSecondary hover:bg-canvas'
+                }`}
+              >
+                <span className="shrink-0">{item.icon}</span>
+                <span className="flex-1 text-left truncate">{item.label}</span>
+                {item.key === 'announcement' && hasNewAnnouncement && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title="有新公告" />
+                )}
+              </button>
+            ))}
           </div>
-          <Divider />
-          <div>
-            <h3 className="font-medium mb-2">Gitee 在线升级 {appVersion && <span className="text-xs text-gray-400">当前版本 v{appVersion}</span>}</h3>
-            <div className="space-y-2 mb-2">
-              <Input size="small" value={updateOwner} placeholder="Gitee 用户名/组织名（owner）" onChange={e => setUpdateOwner(e.target.value)} />
-              <Input size="small" value={updateRepo} placeholder="仓库名（repo），例如 HRAI" onChange={e => setUpdateRepo(e.target.value)} />
-            </div>
-            <div className="flex gap-2">
-              <Button size="small" onClick={() => {
-                window.electronAPI.config.set('update', { owner: updateOwner.trim(), repo: updateRepo.trim() })
-                message.success('Gitee 仓库配置已保存')
-              }}>保存仓库配置</Button>
-              <Button size="small" type="primary" ghost onClick={handleCheckUpdate}>检查更新</Button>
-            </div>
-          </div>
-          <Divider />
-          <div>
-            <h3 className="font-medium mb-2">权限模式（Codex 风格）</h3>
-            <Radio.Group
-              value={permissionMode}
-              onChange={e => {
-                const value = e.target.value as 'ask' | 'auto' | 'readonly'
-                setPermissionMode(value)
-                window.electronAPI.config.set('permissionMode', value).catch(() => {})
-              }}
+          {/* 右侧内容：自带关闭按钮（浮在滚动条之上，避免与顶部滚动条重叠） */}
+          <div className="relative flex-1 min-w-0">
+            <button
+              onClick={() => setSettingsPanelOpen(false)}
+              title="关闭"
+              className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-surface hover:bg-surfaceSubtle dark:bg-canvas dark:hover:bg-surfaceSubtle shadow-sm flex items-center justify-center text-inkSecondary hover:text-ink transition-colors"
             >
-              <Radio.Button value="ask">审批模式</Radio.Button>
-              <Radio.Button value="auto">完全放开</Radio.Button>
-              <Radio.Button value="readonly">只读保护</Radio.Button>
-            </Radio.Group>
-            <div className="text-xs text-inkMuted mt-2 space-y-1.5">
-              <p>· 审批模式（推荐）：AI 写文件、执行命令等操作前会弹窗征求你的同意，日常使用选这项</p>
-              <p>· 完全放开：所有操作直接执行、不再询问，适合完全信任 AI 的场景</p>
-              <p>· 只读保护：AI 只能查询和读取，不能修改文件或执行命令，适合演示、访客使用</p>
-              <p className="pt-1">当 AI 的操作被当前模式拦截时，它会告诉你原因并指导你如何调整；也可以随时回到这里修改。</p>
+              <CloseOutlined className="text-xs" />
+            </button>
+            <div className="h-full overflow-y-auto p-6">
+            {settingsPage === 'settings' && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="font-medium mb-2">日志级别</h3>
+                  <Select defaultValue="info" style={{ width: 200 }} onChange={(v) => window.electronAPI.log.setLevel(v)}>
+                    <Select.Option value="debug">DEBUG</Select.Option>
+                    <Select.Option value="info">INFO</Select.Option>
+                    <Select.Option value="warn">WARN</Select.Option>
+                    <Select.Option value="error">ERROR</Select.Option>
+                  </Select>
+                </div>
+                <Divider />
+                <div>
+                  <h3 className="font-medium mb-2">Gitee 在线升级 {appVersion && <span className="text-xs text-gray-400">当前版本 v{appVersion}</span>}</h3>
+                  <div className="space-y-2 mb-2">
+                    <Input size="small" value={updateOwner} placeholder="Gitee 用户名/组织名（owner）" onChange={e => setUpdateOwner(e.target.value)} />
+                    <Input size="small" value={updateRepo} placeholder="仓库名（repo），例如 HRAI" onChange={e => setUpdateRepo(e.target.value)} />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="small" onClick={() => {
+                      window.electronAPI.config.set('update', { owner: updateOwner.trim(), repo: updateRepo.trim() })
+                      message.success('Gitee 仓库配置已保存')
+                    }}>保存仓库配置</Button>
+                    <Button size="small" type="primary" ghost onClick={handleCheckUpdate}>检查更新</Button>
+                  </div>
+                </div>
+                <Divider />
+                <div>
+                  <h3 className="font-medium mb-2">权限模式（Codex 风格）</h3>
+                  <Radio.Group
+                    value={permissionMode}
+                    onChange={e => {
+                      const value = e.target.value as 'ask' | 'auto' | 'readonly'
+                      setPermissionMode(value)
+                      window.electronAPI.config.set('permissionMode', value).catch(() => {})
+                    }}
+                  >
+                    <Radio.Button value="ask">审批模式</Radio.Button>
+                    <Radio.Button value="auto">完全放开</Radio.Button>
+                    <Radio.Button value="readonly">只读保护</Radio.Button>
+                  </Radio.Group>
+                  <div className="text-xs text-inkMuted mt-2 space-y-1.5">
+                    <p>· 审批模式（推荐）：AI 写文件、执行命令等操作前会弹窗征求你的同意，日常使用选这项</p>
+                    <p>· 完全放开：所有操作直接执行、不再询问，适合完全信任 AI 的场景</p>
+                    <p>· 只读保护：AI 只能查询和读取，不能修改文件或执行命令，适合演示、访客使用</p>
+                    <p className="pt-1">当 AI 的操作被当前模式拦截时，它会告诉你原因并指导你如何调整；也可以随时回到这里修改。</p>
+                  </div>
+                </div>
+                <Divider />
+                <div>
+                  <h3 className="font-medium mb-2 text-red-500">退出程序</h3>
+                  <p className="text-xs text-inkMuted mb-3">
+                    关闭窗口只会将程序最小化到系统托盘并保持服务运行。退出将停止 Hermes 服务与全部渠道 Bot。
+                  </p>
+                  <Button
+                    danger
+                    block
+                    onClick={() => window.electronAPI.app.quit()}
+                  >
+                    退出并停止服务
+                  </Button>
+                </div>
+              </div>
+            )}
+            {settingsPage === 'models' && (
+              <div className="h-full flex flex-col">
+                {/* tab 栏是真正的固定头部（hermes-tabs-fill 让内容区自己滚动），
+                    滚动条只在 tab 下方；保存按钮固定在底部 */}
+                <Tabs
+                  className="hermes-tabs-fill flex-1 min-h-0"
+                  activeKey={modelTabKey}
+                  onChange={setModelTabKey}
+                  items={[
+                    { key: 'dialogue', label: '对话模型', children: <ModelConfigSection type="dialogue" providers={modelConfig.dialogue} onSave={(p) => setModelConfig('dialogue', p)} /> },
+                    { key: 'image', label: '图片模型', children: <ModelConfigSection type="image" providers={modelConfig.image} onSave={(p) => setModelConfig('image', p)} /> },
+                    { key: 'video', label: '视频模型', children: <ModelConfigSection type="video" providers={modelConfig.video} onSave={(p) => setModelConfig('video', p)} /> },
+                    { key: 'multimodal', label: '多模态模型', children: <ModelConfigSection type="multimodal" providers={modelConfig.multimodal} onSave={(p) => setModelConfig('multimodal', p)} /> }
+                  ]}
+                />
+                <div className="shrink-0 pt-4">
+                  <Button
+                    type="primary"
+                    block
+                    onClick={() => window.dispatchEvent(new CustomEvent('model-config-save', { detail: modelTabKey }))}
+                  >
+                    保存配置
+                  </Button>
+                </div>
+              </div>
+            )}
+            {settingsPage === 'channels' && (
+              <div className="h-full flex flex-col">
+                {/* tab 栏是真正的固定头部，滚动条只在 tab 下方；保存按钮固定在底部 */}
+                <Tabs
+                  className="hermes-tabs-fill flex-1 min-h-0"
+                  activeKey={channelTabKey}
+                  onChange={setChannelTabKey}
+                  items={[
+                    { key: 'weixin', label: '个人微信', children: <ChannelConfigSection channel="weixin" /> },
+                    { key: 'wecom', label: '企业微信', children: <ChannelConfigSection channel="wecom" /> },
+                    { key: 'dingtalk', label: '钉钉', children: <ChannelConfigSection channel="dingtalk" /> },
+                    { key: 'feishu', label: '飞书', children: <ChannelConfigSection channel="feishu" /> }
+                  ]}
+                />
+                <div className="shrink-0 pt-4">
+                  <Button
+                    type="primary"
+                    block
+                    onClick={() => window.dispatchEvent(new CustomEvent('channel-config-save', { detail: channelTabKey }))}
+                  >
+                    保存并应用
+                  </Button>
+                </div>
+              </div>
+            )}
+            {settingsPage === 'theme' && (
+              <div className="space-y-4">
+                <p className="text-sm text-inkMuted">应用界面的明暗主题，随时可切换。深色模式适合夜间或光线较暗的办公环境。</p>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { value: 'light', label: '浅色模式', desc: '明亮背景，适合白天办公', icon: <SunOutlined className="text-amber-500" /> },
+                    { value: 'dark', label: '深色模式', desc: '暗色背景，护眼适合夜间', icon: <MoonOutlined className="text-indigo-400" /> }
+                  ].map(t => (
+                    <Card
+                      key={t.value}
+                      size="small"
+                      hoverable
+                      onClick={() => setTheme(t.value as 'light' | 'dark')}
+                      style={{ borderColor: theme === t.value ? 'var(--color-primary)' : undefined }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2 font-medium">{t.icon}{t.label}</span>
+                        {theme === t.value && <CheckCircleFilled className="text-primary" />}
+                      </div>
+                      <p className="text-xs text-inkMuted mt-2">{t.desc}</p>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+            {settingsPage === 'announcement' && (
+              <div className="space-y-4">
+                <p className="text-sm text-inkMuted">系统发布的公告与提示。出现新公告时导航栏对应项会有红点提醒。</p>
+                <div className="rounded-lg border border-line p-4 bg-canvas">
+                  <div className="whitespace-pre-wrap text-sm">{announcementContent || '暂无公告'}</div>
+                </div>
+                {hasNewAnnouncement && (
+                  <Button
+                    type="primary"
+                    onClick={() => {
+                      setHasNewAnnouncement(false)
+                      window.electronAPI.announcement.markRead()
+                    }}
+                  >
+                    标记已读
+                  </Button>
+                )}
+              </div>
+            )}
+            {settingsPage === 'help' && (
+              <Tabs items={[
+                { key: 'quickstart', label: '新手指南', children: (
+                  <div className="space-y-3 text-sm">
+                    <p>1. 点击左侧菜单底部的「设置」→「模型接入」，选择一个对话模型并填写 API Key（支持 DeepSeek、通义千问、智谱等），点击"测试"验证连接</p>
+                    <p>2. 勾选"设为默认"，保存后即可开始对话</p>
+                    <p>3. 点击左侧业务菜单中的功能，自动填充专业 Prompt 到输入框</p>
+                    <p>4. 生成的内容可以直接导出为 Word、Excel、PPT 等格式</p>
+                  </div>
+                )},
+                { key: 'models', label: '模型配置指南', children: <p className="text-sm">在「设置」→「模型接入」中：① 从预设列表添加模型 → ② 填写 API Key → ③ 点击"测试连接"验证 → ④ 启用并设为默认 → ⑤ 保存。所有配置仅保存在本地。</p> },
+                { key: 'channels', label: '渠道接入说明', children: <p className="text-sm">支持企业微信、钉钉、飞书、个人微信接入。在「设置」→「渠道接入」中配置对应平台参数。</p> },
+                { key: 'export', label: '导出技巧', children: <p className="text-sm">在对话中输入"导出为Word/Excel/PPT"即可触发文件导出。建议在指令中明确要求结构化输出以获得更好的排版效果。</p> },
+                { key: 'security', label: '安全说明', children: <p className="text-sm">所有数据（API Key、聊天记录、企业文档）均保存在本地，不会上传至任何外部服务器。</p> },
+                { key: 'shortcuts', label: '快捷键', children: (
+                  /* 整个页签共用一个两列网格：名称一列、快捷键一列，
+                     所有行统一对齐（含不同分组之间），内容靠左 */
+                  <div className="text-sm grid grid-cols-[max-content_auto] gap-x-8">
+                    {[
+                      { title: '消息输入框', rows: [['发送消息', 'Enter'], ['换行', 'Shift + Enter'], ['选中斜杠命令', '↑ / ↓ / Tab']] },
+                      { title: '窗口', rows: [['退出程序', 'Ctrl + Q']] },
+                    ].map(group => (
+                      <React.Fragment key={group.title}>
+                        <p className="col-span-2 font-medium pt-3 first:pt-0 text-ink">{group.title}</p>
+                        {group.rows.map(([label, key]) => (
+                          <React.Fragment key={label}>
+                            <span className="text-inkSecondary py-0.5">{label}</span>
+                            <span className="text-xs text-inkMuted py-0.5 self-center">{key}</span>
+                          </React.Fragment>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )},
+              ]} />
+            )}
+            {settingsPage === 'about' && (
+              <div className="space-y-4 text-sm">
+                <p className="text-lg font-bold text-ink">Hermes 人事行政一体化智能专家</p>
+                <p className="text-inkMuted leading-relaxed">
+                  基于 Hermes 智能体引擎，覆盖人力资源中心 10 个模块与行政综合中心 12 个模块的企业一体化智能助手。
+                  所有数据（API Key、聊天记录、企业文档）均保存在本地。
+                </p>
+                <div className="flex items-center gap-4">
+                  <p>当前版本 <span className="text-xs text-inkMuted">v{appVersion}</span></p>
+                  <Button icon={<ThunderboltOutlined />} onClick={handleCheckUpdate}>检查更新</Button>
+                </div>
+              </div>
+            )}
             </div>
-          </div>
-          <Divider />
-          <div>
-            <h3 className="font-medium mb-2 text-red-500">退出程序</h3>
-            <p className="text-xs text-inkMuted mb-3">
-              关闭窗口只会将程序最小化到系统托盘并保持服务运行。退出将停止 Hermes 服务与全部渠道 Bot。
-            </p>
-            <Button
-              danger
-              block
-              onClick={() => window.electronAPI.app.quit()}
-            >
-              退出并停止服务
-            </Button>
           </div>
         </div>
-      </Drawer>
+      </Modal>
+
 
       {/* Gitee 在线升级弹窗 */}
       <Modal
@@ -469,41 +607,6 @@ const TopBar: React.FC = () => {
         <div className="whitespace-pre-wrap text-sm">{announcementContent || '暂无公告'}</div>
       </Modal>
 
-      {/* 帮助抽屉 */}
-      <Drawer title="使用帮助" open={helpOpen} onClose={() => setHelpOpen(false)} width={600}>
-        <Tabs items={[
-          { key: 'quickstart', label: '新手指南', children: (
-            <div className="space-y-3 text-sm">
-              <p>1. 点击右上角"模型"按钮，选择一个对话模型并填写 API Key（支持 DeepSeek、通义千问、智谱等），点击"测试"验证连接</p>
-              <p>2. 勾选"设为默认"，保存后即可开始对话</p>
-              <p>3. 点击左侧业务菜单中的功能，自动填充专业 Prompt 到输入框</p>
-              <p>4. 生成的内容可以直接导出为 Word、Excel、PPT 等格式</p>
-            </div>
-          )},
-          { key: 'models', label: '模型配置指南', children: <p className="text-sm">在"模型"抽屉中：① 从预设列表添加模型 → ② 填写 API Key → ③ 点击"测试连接"验证 → ④ 启用并设为默认 → ⑤ 保存。所有配置仅保存在本地。</p> },
-          { key: 'channels', label: '渠道接入说明', children: <p className="text-sm">支持企业微信、钉钉、飞书、个人微信接入。在"渠道接入设置"中配置对应平台参数。</p> },
-          { key: 'export', label: '导出技巧', children: <p className="text-sm">在对话中输入"导出为Word/Excel/PPT"即可触发文件导出。建议在指令中明确要求结构化输出以获得更好的排版效果。</p> },
-          { key: 'security', label: '安全说明', children: <p className="text-sm">所有数据（API Key、聊天记录、企业文档）均保存在本地，不会上传至任何外部服务器。</p> },
-          { key: 'shortcuts', label: '快捷键', children: (
-            <div className="text-sm space-y-3">
-              {[
-                { title: '消息输入框', rows: [['发送消息', 'Enter'], ['换行', 'Shift + Enter'], ['选中斜杠命令', '↑ / ↓ / Tab']] },
-                { title: '窗口', rows: [['退出程序', 'Ctrl + Q']] },
-              ].map(group => (
-                <div key={group.title}>
-                  <p className="font-medium mb-1 text-ink">{group.title}</p>
-                  {group.rows.map(([label, key]) => (
-                    <div key={label} className="flex items-center justify-between py-0.5 border-b border-line/50 last:border-0">
-                      <span className="text-inkSecondary">{label}</span>
-                      <span className="text-xs text-inkMuted">{key}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )},
-        ]} />
-      </Drawer>
     </>
   )
 }
@@ -540,9 +643,14 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
 
   const isDialogue = type === 'dialogue'
   const defaultModel = items.find(p => p.enabled && p.isPrimary) || items.find(p => p.enabled)
-  // 实际生效的对话模型：输入框选过（且已启用）则优先，否则用配置页"默认"
+  // 输入框选中的模型（不管启停先找到它，用于区分提示文案）
+  const inputPicked = isDialogue && inputSelectedModels.dialogue
+    ? items.find(p => p.id === inputSelectedModels.dialogue)
+    : undefined
+  // 实际生效的对话模型：输入框选过且可用则优先，否则用配置页"默认"。
+  // 可用判断与输入框/主进程路由保持一致（enabled !== false）
   const effectiveDialogue = isDialogue
-    ? (inputSelectedModels.dialogue && items.find(p => p.enabled && p.id === inputSelectedModels.dialogue)) || defaultModel
+    ? (inputPicked && inputPicked.enabled !== false ? inputPicked : defaultModel)
     : defaultModel
   const presetsAvailable = MODEL_PRESETS.filter(p => p.type === type && !items.some(i => i.id === p.id))
 
@@ -561,12 +669,14 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
     const preset = MODEL_PRESETS.find(p => p.id === presetId)
     if (!preset) return
     // Key 为空，默认未启用（填齐后开关才能点）
-    setItems([...items, { ...preset, apiKey: '', enabled: false, isPrimary: false }])
+    // 新卡片插到最前面，避免列表长了之后加在后面看不到
+    setItems([{ ...preset, apiKey: '', enabled: false, isPrimary: false }, ...items])
     setTestResults({})
   }
 
   const addCustom = () => {
-    setItems([...items, {
+    // 新建的自定义模型卡片排在最前面，方便马上填写
+    setItems([{
       id: `custom-${Date.now()}`,
       name: '自定义模型',
       provider: '自定义',
@@ -578,7 +688,7 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
       // 必填项为空，默认未启用（填齐后开关才能点）
       enabled: false,
       isPrimary: false
-    }])
+    }, ...items])
     setTestResults({})
   }
 
@@ -700,22 +810,44 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
 
   return (
     <div className="space-y-4">
-      {/* 当前默认模型状态 */}
+      {/* 当前生效模型状态：按真实来源区分提示，输入框选择优先，回退时明确说明 */}
       <Alert
-        type={defaultModel ? 'success' : 'warning'}
+        type={defaultModel && (!inputPicked || inputPicked.enabled !== false) ? 'success' : 'warning'}
         showIcon
         icon={defaultModel ? <ThunderboltOutlined /> : undefined}
         message={
           isDialogue
-            ? effectiveDialogue
-              ? `当前对话将使用「${effectiveDialogue.name}」${effectiveDialogue.apiKey ? '' : '（API Key 未填写，请补充后测试）'}`
-              : '尚未启用任何对话模型，请添加并启用一个模型'
+            ? (() => {
+                if (!effectiveDialogue) return '尚未启用任何对话模型，请添加并启用一个模型'
+                const keyHint = effectiveDialogue.apiKey ? '' : '（API Key 未填写，请补充后测试）'
+                if (inputPicked && inputPicked.enabled !== false) {
+                  return `输入框已选择「${inputPicked.name}」，当前对话使用它${keyHint}`
+                }
+                if (inputPicked) {
+                  return `输入框选择的「${inputPicked.name}」已禁用，当前实际使用「${effectiveDialogue.name}」${keyHint}`
+                }
+                return `当前实际使用「${effectiveDialogue.name}」${keyHint}`
+              })()
             : `已配置 ${items.filter(p => p.enabled).length}/${items.length} 个启用的${TYPE_LABELS[type]}`
         }
       />
 
+      {/* 添加模型：预设下拉 + 自定义入口，放在卡片列表前面 */}
+      <div className="flex flex-wrap gap-2 items-center">
+        {presetsAvailable.length > 0 && (
+          <Select
+            placeholder={`从预设中添加${TYPE_LABELS[type]}`}
+            style={{ minWidth: 260 }}
+            size="small"
+            onChange={addPreset}
+            options={presetsAvailable.map(p => ({ value: p.id, label: `${p.name}（${p.provider}）` }))}
+          />
+        )}
+        <Button size="small" icon={<PlusOutlined />} onClick={addCustom}>添加自定义模型</Button>
+      </div>
+
       {items.length === 0 && (
-        <Empty description="暂无模型配置，可从下方预设中添加" />
+        <Empty description="暂无模型配置，请从上方预设中添加一个模型" />
       )}
 
       {/* 模型列表 */}
@@ -899,20 +1031,6 @@ const ModelConfigSection: React.FC<{ type: ModelType; providers: ModelProvider[]
         })}
       </div>
 
-      {/* 添加模型 */}
-      <div className="flex flex-wrap gap-2 items-center">
-        {presetsAvailable.length > 0 && (
-          <Select
-            placeholder={`从预设中添加${TYPE_LABELS[type]}`}
-            style={{ minWidth: 260 }}
-            size="small"
-            onChange={addPreset}
-            options={presetsAvailable.map(p => ({ value: p.id, label: `${p.name}（${p.provider}）` }))}
-          />
-        )}
-        <Button size="small" icon={<PlusOutlined />} onClick={addCustom}>添加自定义模型</Button>
-      </div>
-
     </div>
   )
 }
@@ -958,7 +1076,7 @@ const CHANNEL_META: Record<string, {
   }
 }
 
-const ChannelConfigSection: React.FC<{ channel: string; onSaved?: () => void }> = ({ channel, onSaved }) => {
+const ChannelConfigSection: React.FC<{ channel: string }> = ({ channel }) => {
   const { message } = AntApp.useApp()
   const [form] = Form.useForm()
   const [enabled, setEnabled] = useState(false)
@@ -978,6 +1096,15 @@ const ChannelConfigSection: React.FC<{ channel: string; onSaved?: () => void }> 
   }
 
   useEffect(() => () => clearScanTimer(), [])
+
+  // 面板底部固定的「保存并应用」按钮通过事件触发当前渠道的表单提交
+  useEffect(() => {
+    const h = (e: Event) => {
+      if ((e as CustomEvent).detail === channel) form.submit()
+    }
+    window.addEventListener('channel-config-save', h)
+    return () => window.removeEventListener('channel-config-save', h)
+  }, [channel, form])
 
   const refreshStatus = async () => {
     try {
@@ -1011,8 +1138,6 @@ const ChannelConfigSection: React.FC<{ channel: string; onSaved?: () => void }> 
       if (result.success) {
         setEnabled(nextEnabled)
         message.success(result.message || '配置已保存')
-        // 先提示成功，稍候再关闭页面
-        onSaved?.()
       } else {
         message.error(result.message || '保存失败')
       }
@@ -1151,9 +1276,6 @@ const ChannelConfigSection: React.FC<{ channel: string; onSaved?: () => void }> 
                   : <Input placeholder={field.placeholder || `请输入 ${field.label}`} />}
             </Form.Item>
           ))}
-          <Button type="primary" htmlType="submit" loading={saving} block>
-            保存并应用
-          </Button>
         </Form>
       )}
     </div>
