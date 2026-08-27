@@ -39,3 +39,6 @@ workspace/templates/
 workspace/company_context.json
  (Initial commit: Hermes HR admin desktop app source)
 /main.js
+
+# Gitee 私人令牌（本地使用，勿提交）
+.gitee_token
