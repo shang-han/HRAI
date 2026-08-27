@@ -35,6 +35,8 @@ interface Session {
   updatedAt: string
   messageCount: number
   workPriority?: WorkPriority
+  /** 该会话的工作目录（智能体 cwd）。空串 = 内置工作区 */
+  workDir?: string
   /** 系统保留会话（默认会话）：禁止删除 */
   isDefault?: boolean
 }
@@ -49,10 +51,12 @@ interface SessionState {
 
   // Actions
   initSession: () => Promise<void>
-  createSession: (name?: string) => Promise<void>
+  createSession: (name?: string, workDir?: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
+  /** 改会话工作目录。成功后智能体侧会重开 ACP 会话（上下文重置） */
+  setSessionWorkDir: (id: string, workDir: string) => Promise<{ success: boolean; error?: string }>
   refreshMessages: (sessionId: string) => Promise<void>
   sendMessage: (content: string, images?: string[], intent?: { hint?: string; id?: string }) => Promise<void>
   addMessage: (message: Message) => void
@@ -260,9 +264,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ isStopping: true, isLoading: false, pendingMessages: [] })
   },
 
-  createSession: async (name?: string) => {
+  createSession: async (name?: string, workDir?: string) => {
     try {
-      const session = await window.electronAPI.session.create(name)
+      const session = await window.electronAPI.session.create(name, workDir)
       const sessions = await window.electronAPI.session.list()
       set({
         sessions,
@@ -317,6 +321,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ sessions })
     } catch (err) {
       console.error('重命名会话失败:', err)
+    }
+  },
+
+  setSessionWorkDir: async (id: string, workDir: string) => {
+    try {
+      const res = await window.electronAPI.session.setWorkDir(id, workDir)
+      if (!res?.success) return { success: false, error: res?.error || '设置失败' }
+      // 只刷会话列表，不动 messages：换目录重置的是智能体侧上下文，
+      // 前端聊天记录仍然保留（这点在确认弹窗里也是这么向用户承诺的）
+      const sessions = await window.electronAPI.session.list()
+      set({ sessions })
+      return { success: true }
+    } catch (err: any) {
+      console.error('设置会话工作目录失败:', err)
+      return { success: false, error: String(err?.message || err) }
     }
   },
 

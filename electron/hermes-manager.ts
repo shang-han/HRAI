@@ -18,6 +18,45 @@ interface StreamHandler {
   onError: (error: string) => void
 }
 
+/**
+ * 单个 ACP 会话的上下文占用 / 缓存用量快照。
+ *
+ * 数据全部由 Hermes 内核给出，客户端只做搬运，不自己数 token：
+ *  - size / used 来自 ACP 原生的 usage_update 通知（内核用
+ *    estimate_request_tokens_rough 按真正发给模型的三个桶算：系统提示 +
+ *    历史 + 工具 schema），建会话、每轮结束、压缩之后都会推一次；
+ *  - lastTurn 来自 session/prompt 的返回值 usage，是模型 API 报的真实用量。
+ * 在渲染进程里重算一遍必然和内核发散——同一个数两套算法就是 bug 温床。
+ */
+export interface SessionUsage {
+  /** 模型上下文窗口（token）。0 = 内核还没报过（拿不到窗口长度时不发通知） */
+  size: number
+  /** 当前请求的预估占用（token） */
+  used: number
+  /** 最近一轮的真实 token 明细 */
+  lastTurn: {
+    /** = provider 的 prompt_tokens，已含缓存命中部分 */
+    input: number
+    output: number
+    total: number
+    cachedRead: number
+    thought: number
+  } | null
+  /** 本次进程运行期间的累计输入 token（用于算缓存命中率） */
+  totalInput: number
+  /** 本次进程运行期间的累计缓存命中 token */
+  totalCachedRead: number
+  /**
+   * 是否真的观测到过缓存命中（命中 token > 0）。
+   * 刻意不用"返回值里有没有这个字段"来判断：线路不支持缓存时字段也会是 0
+   * 而不是缺失，只有见过大于 0 才能说缓存在这条线路上生效了。
+   */
+  cacheObserved: boolean
+  /** 已统计的回合数 */
+  turns: number
+  updatedAt: number
+}
+
 export interface HermesPermissionBridge {
   /** 当前权限模式：ask=高危审批 / auto=完全放开 / readonly=只读保护 */
   getMode: () => 'ask' | 'auto' | 'readonly'
@@ -48,6 +87,9 @@ export class HermesManager {
   private sessionQueues = new Map<string, Promise<void>>()
   private permissionBridge: HermesPermissionBridge | null = null
   private pendingPermissions = new Map<number, (allow: boolean) => void>()
+  /** 按 ACP 会话 id 存的上下文/缓存用量；主进程负责映射回前端会话 id */
+  private usageByAcpSession = new Map<string, SessionUsage>()
+  private usageListener: ((acpSessionId: string, usage: SessionUsage) => void) | null = null
   private gatewayProcess: ChildProcess | null = null
   private gatewayStarting: Promise<void> | null = null
   private channelSyncProcess: ChildProcess | null = null
@@ -382,18 +424,47 @@ export class HermesManager {
 
   /**
    * 创建新会话 — ACP: session/new（必填 cwd + mcpServers）
+   *
+   * cwd 是"每会话工作目录"落地的唯一入口：Python 侧 acp_adapter/session.py
+   * 会把它挂到 SessionState 上，并注册为该会话终端任务的 cwd 覆盖 +
+   * runtime_cwd 的 _SESSION_CWD（优先级高于进程级 TERMINAL_CWD 环境变量）。
+   * 所以同一个内核可以同时跑在不同目录下的多个会话，无需重启。
    */
-  async createSession(): Promise<string> {
+  async createSession(cwd?: string): Promise<string> {
     const result = await this.sendAcpRequest('session/new', {
-      cwd: this.sessionCwd(),
+      cwd: this.sessionCwd(cwd),
       mcpServers: []
     })
     this.currentSessionId = result?.sessionId || result?.session_id || null
     return this.currentSessionId || ''
   }
 
-  private sessionCwd(): string {
+  /**
+   * 解析会话工作目录：优先用传入的目录，非法/不存在时回落到内置工作区。
+   * 回落而不是抛错，是因为目录可能在两次启动之间被用户删掉或移动，
+   * 此时"这轮对话还能用"比"报错拒绝服务"更合理；上层 UI 另有校验与提示。
+   */
+  private sessionCwd(preferred?: string): string {
+    const target = (preferred || '').trim()
+    if (target) {
+      try {
+        if (fs.statSync(target).isDirectory()) return path.resolve(target)
+        this.logManager?.warn(`会话工作目录不是目录，回落内置工作区: ${target}`)
+      } catch {
+        this.logManager?.warn(`会话工作目录不存在，回落内置工作区: ${target}`)
+      }
+    }
     return this.workspacePath
+  }
+
+  /** 内置工作区绝对路径（会话未指定工作目录时的默认值） */
+  getWorkspacePath(): string {
+    return this.workspacePath
+  }
+
+  /** Hermes 安装根目录：用于拦住"把工作目录指到内核自己身上"这种自伤操作 */
+  getInstallRoot(): string {
+    return this.basePath
   }
 
   /**
@@ -443,10 +514,12 @@ export class HermesManager {
       try {
         // 智能体一轮可能包含多次工具调用；超时 4 分钟足够长，
         // 超时后主动取消 ACP 会话，避免下一轮被 Hermes 当作 active-turn redirect。
-        await this.sendAcpRequest('session/prompt', {
+        const result = await this.sendAcpRequest('session/prompt', {
           prompt: content,
           sessionId
         }, 240000)
+        // 返回值里带本轮真实 token 用量（含缓存命中），只有这里能拿到
+        this.applyPromptUsage(sessionId, result)
         handler.onDone()
       } catch (err: any) {
         await this.cancelSession(sessionId).catch(() => {})
@@ -508,10 +581,108 @@ export class HermesManager {
     if (/^\/(stop|new)(?:\s|$)/i.test(command.trim())) {
       this.stopRequested = true
     }
+    // /compress 要调辅助模型把中间几十轮对话总结成摘要，30 秒经常不够，
+    // 超时会让用户看到"压缩失败"而实际上内核还在压。这类会真的过 LLM 的命令给 3 分钟。
+    const slow = /^\/(compress|compact)(?:\s|$)/i.test(command.trim())
     await this.sendAcpRequest('session/prompt', {
       prompt: [{ type: 'text', text: command }],
       sessionId
-    }, 30000)
+    }, slow ? 180000 : 30000)
+  }
+
+  // ============ 上下文占用 / 缓存用量 ============
+
+  /** 注册用量变化回调（主进程用它把数据转发给渲染进程） */
+  onUsage(cb: (acpSessionId: string, usage: SessionUsage) => void): void {
+    this.usageListener = cb
+  }
+
+  getUsage(acpSessionId: string): SessionUsage | null {
+    return this.usageByAcpSession.get(acpSessionId) || null
+  }
+
+  /** ACP 会话被丢弃（改工作目录 / 删会话）时清掉，避免旧占用数残留 */
+  clearUsage(acpSessionId: string): void {
+    this.usageByAcpSession.delete(acpSessionId)
+  }
+
+  private touchUsage(acpSessionId: string): SessionUsage {
+    let u = this.usageByAcpSession.get(acpSessionId)
+    if (!u) {
+      u = {
+        size: 0, used: 0, lastTurn: null,
+        totalInput: 0, totalCachedRead: 0,
+        cacheObserved: false, turns: 0, updatedAt: 0
+      }
+      this.usageByAcpSession.set(acpSessionId, u)
+    }
+    return u
+  }
+
+  /** 数值容错：字段名两种写法都收，非数字/负数一律当 0 */
+  private static pickNum(src: any, ...keys: string[]): number {
+    for (const k of keys) {
+      const v = src?.[k]
+      if (v === undefined || v === null) continue
+      const n = Number(v)
+      if (Number.isFinite(n)) return Math.max(0, Math.round(n))
+    }
+    return 0
+  }
+
+  /** 处理 ACP 原生 usage_update（上下文窗口 + 当前预估占用） */
+  private applyUsageUpdate(acpSessionId: string | undefined, update: any): void {
+    if (!acpSessionId) return
+    const size = HermesManager.pickNum(update, 'size')
+    const used = HermesManager.pickNum(update, 'used')
+    const u = this.touchUsage(acpSessionId)
+    // size 为 0 时保留上一次的窗口长度：内核拿不到窗口长度时根本不发通知，
+    // 这里的 0 更可能是解析失败，不该把已知的窗口长度抹成未知。
+    if (size > 0) u.size = size
+    u.used = used
+    u.updatedAt = Date.now()
+    this.emitUsage(acpSessionId, u)
+  }
+
+  /**
+   * 从 session/prompt 的返回值里取本轮 token 明细。
+   * 字段名同时接受 camelCase 与 snake_case：acp 的 pydantic 模型两套名字都有
+   * （alias 是 camelCase），序列化时按哪套输出取决于对端怎么 dump，不能赌。
+   */
+  private applyPromptUsage(acpSessionId: string, result: any): void {
+    const usage = result?.usage
+    if (!usage || typeof usage !== 'object') return
+    const input = HermesManager.pickNum(usage, 'inputTokens', 'input_tokens')
+    const output = HermesManager.pickNum(usage, 'outputTokens', 'output_tokens')
+    const total = HermesManager.pickNum(usage, 'totalTokens', 'total_tokens')
+    const cachedRead = HermesManager.pickNum(usage, 'cachedReadTokens', 'cached_read_tokens')
+    const thought = HermesManager.pickNum(usage, 'thoughtTokens', 'thought_tokens')
+    // 三个主计数全是 0 说明这轮没真正调过模型（纯本地斜杠命令），不计入累计
+    if (!input && !output && !total) return
+
+    const u = this.touchUsage(acpSessionId)
+    u.lastTurn = { input, output, total, cachedRead, thought }
+    u.totalInput += input
+    u.totalCachedRead += cachedRead
+    u.turns += 1
+    if (cachedRead > 0) u.cacheObserved = true
+    u.updatedAt = Date.now()
+    if (cachedRead > 0 && input > 0) {
+      this.logManager?.info(
+        `[ACP] 缓存命中 ${cachedRead}/${input} tokens (${Math.round((cachedRead / input) * 100)}%)`
+      )
+    }
+    this.emitUsage(acpSessionId, u)
+  }
+
+  private emitUsage(acpSessionId: string, usage: SessionUsage): void {
+    try {
+      // 传副本：渲染进程那边会经 IPC 结构化克隆，但主进程内的监听者
+      // 拿到引用后如果改了字段，这里的快照就被污染了。
+      this.usageListener?.(acpSessionId, { ...usage, lastTurn: usage.lastTurn ? { ...usage.lastTurn } : null })
+    } catch (err: any) {
+      this.logManager?.warn(`用量回调失败: ${err?.message || err}`)
+    }
   }
 
   /**
@@ -662,6 +833,14 @@ export class HermesManager {
       // 可用命令列表不依赖当前 streamHandler，提前捕获供前端斜杠补全使用。
       if (updateType === 'available_commands_update' && Array.isArray(update.available_commands)) {
         this.availableCommands = update.available_commands
+        return
+      }
+
+      // 上下文占用：内核在建会话时、每轮结束后、压缩完成后各推一次。
+      // 必须挡在下面 streamHandler 判空之前——这些通知大多发生在两轮之间，
+      // 那时 streamHandler 已被 finally 清成 null，放在后面等于永远收不到。
+      if (updateType === 'usage_update') {
+        this.applyUsageUpdate(params?.sessionId || params?.session_id, update)
         return
       }
 
@@ -1092,6 +1271,18 @@ display:
       dm_policy: open
 `
     }
+
+    // 提示词缓存（Anthropic prompt caching）：内核默认就开着，这里把它显式写出来，
+    // 一是让"缓存归本应用管"这件事在配置里有据可查，二是内核将来改默认值时
+    // 本应用的成本特征不会跟着悄悄变。值取内核文档里的默认档 5m。
+    //
+    // 注意它是有条件生效的：内核按 provider/model 判断线路支不支持
+    // （anthropic 原生、OpenRouter/Nous 上的 Claude/Kimi、Qwen 系列等），
+    // 普通 OpenAI 兼容端点拿不到缓存字段，占用率面板里会如实显示"未命中"。
+    // 把 cache_ttl 设成 false / null / "off" 可以整体关掉。
+    yaml += `prompt_caching:
+  cache_ttl: "5m"
+`
 
     // 权限策略块：approvals 始终写入（即使没有启用的模型），
     // config.yaml 是 Hermes 的 mtime 热缓存，写入立即生效、无需重启。

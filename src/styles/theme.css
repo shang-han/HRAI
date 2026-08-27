@@ -165,6 +165,60 @@
   animation: fadeIn 0.3s ease-out;
 }
 
+/* ---------- 侧边栏宽度拖拽手柄 ----------
+   贴在侧边栏右边界内侧，横跨整列高度。命中区 6px（1px 的 border 太细，
+   鼠标根本对不准），视觉上只画 2px 的主色竖线且默认全透明——
+   常态看不见，悬停/拖动时才把分隔线"点亮"。
+   放在 aside 内侧而不是骑在边界上（translateX(50%)），是因为 aside 和 main
+   都是 z-index: auto 的 flex 兄弟，按树序 main 在后面绘制，
+   任何往右溢出的部分都会被 main 的背景盖掉。侧边栏的滚动条已被
+   .scrollbar-hide 隐藏（见 index.css），不会和这 6px 抢命中区。      */
+.hermes-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 10;
+  width: 6px;
+  cursor: col-resize;
+  /* touch-action: none —— 指针捕获期间不让浏览器把手势解释成滚动/缩放，
+     否则触屏或触控板上会中途收到 pointercancel，拖动被打断。
+     user-select: none —— 按下手柄那一刻就别去选中任何东西。 */
+  touch-action: none;
+  user-select: none;
+}
+.hermes-sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 2px;
+  background: var(--color-primary);
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.hermes-sidebar-resizer:hover::after,
+.hermes-sidebar-resizer.is-resizing::after {
+  opacity: 1;
+}
+
+/* 拖动中必须掐掉侧边栏自身的 transition：
+   aside 上有 transition-all duration-300（收起/展开的宽度动画靠它，
+   两个分支返回的都是 <aside>，React 复用同一个 DOM 节点所以能过渡），
+   拖动时若留着，边界会以 300ms 缓动追鼠标，手感是"黏住了"。 */
+.hermes-sidebar.is-resizing {
+  transition: none;
+}
+
+/* 拖动期间全局锁光标 + 禁选：不加的话鼠标一划过聊天区就把消息文本全选中，
+   且光标会随经过的元素乱变。必须 !important——沿途元素各自设了 cursor。 */
+body.hermes-col-resizing,
+body.hermes-col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 /* ---------- 玻璃材质（浮在渐变底上的所有面共用） ----------
    刻意不用 backdrop-filter：气泡背后就是一层平滑渐变，模糊平滑渐变
    等于没模糊；而一屏几十上百个 backdrop-filter 层会实打实拖垮滚动帧率
@@ -387,6 +441,11 @@
 }
 
 /* 输入框高度拖动手柄 */
+.hermes-resize-handle {
+  /* 同侧边栏手柄：指针捕获期间别让浏览器把手势解释成滚动，否则会收到
+     pointercancel 打断拖动 */
+  touch-action: none;
+}
 .hermes-resize-grip {
   width: 40px;
   height: 5px;
@@ -409,6 +468,179 @@
   .hermes-send-btn {
     transition-duration: .01ms !important;
   }
+}
+
+/* ---------- 会话列几何（消息列 / 空态问候语 / 输入框三者共用） ----------
+   "AI 气泡左右边界和输入框严格对齐"这件事的唯一来源：三处都套这个类，
+   对齐就由构造保证，不会因为将来只改了其中一处的 padding 而错位。
+
+   左右各留出 --thread-gutter 的内边距（正好等于头像宽 + 间距），
+   头像用绝对定位挂到内容左边界之外、落进这段内边距里，因此
+   不参与行内布局、不会把气泡往右推——这是气泡能和输入框对齐的原因。
+   max-width 把两侧 gutter 都算进去，于是内容宽度恒为 820，内容仍居中，
+   且头像最左点正好等于本列外框最左点；外框受 max-width + auto 边距约束，
+   永不超出滚动容器，所以窗口再窄、侧边栏拖得再宽，头像也不会被裁掉。
+
+   为什么不直接靠 mx-auto 的富余空间来悬挂头像：侧边栏拖宽或窗口变窄时
+   富余空间会归零，而向左溢出滚动容器的内容在 LTR 下是不可滚动的，
+   只会被静默裁掉——头像会缺一半，且不会有横向滚动条提示。
+
+   注意：theme.css 在 @tailwind utilities 之前 import，同特异性下工具类胜出，
+   所以套了这个类的元素上不能再留 px-* / max-w-* / mx-auto。          */
+.hermes-thread-col {
+  --avatar-size: 34px;
+  --avatar-gap: 12px;
+  --thread-gutter: calc(var(--avatar-size) + var(--avatar-gap));
+  width: 100%;
+  max-width: calc(820px + var(--thread-gutter) * 2);
+  margin-inline: auto;
+  padding-inline: var(--thread-gutter);
+}
+
+/* AI 头像：挂在气泡左侧的 gutter 里。渐变取和发送按钮/问候语同一套主色→辅助色，
+   放大后能撑得住渐变；投影让它从渐变底上浮起来。 */
+.hermes-msg-avatar {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--thread-gutter));
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  box-shadow: 0 2px 8px -3px var(--shadow-glass);
+  user-select: none;
+}
+
+/* ---------- 会话工作目录 ----------
+   目录候选行：整行可点（不只是那个小圆点），选中态用主色淡底标出。
+   antd 的 .ant-radio-wrapper 默认 inline + span 不允许收缩，长路径会把弹窗
+   撑出横向滚动条，所以这里强制 flex + min-width:0，让路径行自己去 ellipsis。 */
+
+/* 候选列表：内置 + 最多 6 条历史 + 1 条自选，全展开会把弹窗顶出屏幕，
+   所以列表自己滚，弹窗高度保持可控 */
+.hermes-workdir-list {
+  max-height: 232px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.hermes-workdir-opt.ant-radio-wrapper {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  transition: background .18s ease, border-color .18s ease;
+}
+.hermes-workdir-opt.ant-radio-wrapper:hover {
+  border-color: var(--color-primary);
+}
+.hermes-workdir-opt.ant-radio-wrapper-checked {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+.hermes-workdir-opt.ant-radio-wrapper > span:last-child {
+  flex: 1;
+  min-width: 0;
+  padding-inline-end: 0;
+}
+.hermes-workdir-path {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  /* 长路径截断而不是换行：目录层级深的时候换行会把每一行撑到三四行高。
+     完整路径挂在 Tooltip 上，不靠这里展示全貌。
+     刻意不用 direction: rtl 那套"保留尾部"技巧——路径里含中文目录名时
+     双向算法会把分隔符甩到另一头，观感不可控。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 顶栏工作目录胶囊：常态弱化，悬停才亮出主色，提示"这里可点可改" */
+.hermes-workdir-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  padding: 2px 9px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  transition: background .18s ease, border-color .18s ease, color .18s ease;
+}
+.hermes-workdir-chip:hover {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+/* flex 子项默认 min-width:auto，不加这行时长目录名不会截断，
+   而是直接顶穿 max-width 溢出到胶囊外面 */
+.hermes-workdir-chip > span {
+  min-width: 0;
+}
+
+/* ---------- 顶栏上下文占用率胶囊 ----------
+   结构见 src/components/ContextMeter.tsx：环 + 百分比数字。
+   三档配色对应 is-low / is-mid / is-high，只是"离上限还有多远"的视觉提示，
+   不代表内核的自动压缩阈值（那个阈值按模型窗口和 max_tokens 动态算，见组件注释）。 */
+.hermes-usage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 5px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums; /* 百分比跳动时胶囊宽度不抖 */
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  transition: background .18s ease, border-color .18s ease, color .18s ease;
+}
+.hermes-usage-chip:hover {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+.hermes-usage-ring {
+  display: block;
+  flex: none;
+}
+.hermes-usage-ring-track {
+  fill: none;
+  stroke: var(--color-line);
+  stroke-width: 2.5;
+}
+/* 进度环取 currentColor：档位只改胶囊的 color，环自动跟随，不用写三份 stroke */
+.hermes-usage-ring-bar {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray .35s ease;
+}
+.hermes-usage-chip.is-low {
+  color: var(--color-ink-muted);
+}
+.hermes-usage-chip.is-mid {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+.hermes-usage-chip.is-high {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 /* ---------- 聊天区（消息 + 输入框所在的整块区域） ---------- */

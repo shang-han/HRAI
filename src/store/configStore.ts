@@ -26,6 +26,8 @@ interface ConfigState {
   shortcuts: Record<string, string>
   layout: {
     sidebarCollapsed: boolean
+    /** 侧边栏展开时的宽度（px），用户拖拽调整后持久化 */
+    sidebarWidth: number
     inputMode: 'single' | 'multi'
   }
   loaded: boolean
@@ -36,9 +38,25 @@ interface ConfigState {
   setSelectedModel: (type: string, id: string) => void
   setShortcut: (key: string, value: string) => void
   toggleSidebar: () => void
+  /**
+   * 设置侧边栏宽度。
+   * persist=false（默认）只更新内存：拖动过程中每帧都会调，
+   * 若每次都写配置文件，一次拖动就是上百次 IPC + 磁盘写。
+   * 松手时再用 persist=true 落盘一次。
+   */
+  setSidebarWidth: (width: number, persist?: boolean) => void
   setInputMode: (mode: 'single' | 'multi') => void
   loadConfig: () => Promise<void>
 }
+
+/* 侧边栏宽度区间。
+   下限 240：再窄业务导航三级条目（pl-8 缩进 + 右侧箭头）就只剩几个字，没法用。
+   上限 560：更宽纯属浪费，且拖动时还会再受窗口宽度约束（见 Sidebar.startResizeWidth）。 */
+export const SIDEBAR_MIN_W = 240
+export const SIDEBAR_MAX_W = 560
+export const SIDEBAR_DEFAULT_W = 340
+/** 收起态宽度，与展开态共用同一个 inline width 以便 CSS 过渡能插值 */
+export const SIDEBAR_COLLAPSED_W = 48
 
 // 预设模型列表（apiKey/enabled 由 defaultModelConfig 填充）
 const MODEL_PRESETS: Array<Omit<ModelProvider, 'apiKey' | 'enabled'>> = [
@@ -74,6 +92,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   shortcuts: {},
   layout: {
     sidebarCollapsed: false,
+    sidebarWidth: SIDEBAR_DEFAULT_W,
     inputMode: 'single'
   },
   loaded: false,
@@ -109,6 +128,12 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     await window.electronAPI.config.set('layout', { ...get().layout, sidebarCollapsed: collapsed })
   },
 
+  setSidebarWidth: async (width, persist = false) => {
+    const layout = { ...get().layout, sidebarWidth: width }
+    set({ layout })
+    if (persist) await window.electronAPI.config.set('layout', layout)
+  },
+
   setInputMode: async (mode) => {
     set({ layout: { ...get().layout, inputMode: mode } })
     await window.electronAPI.config.set('layout', { ...get().layout, inputMode: mode })
@@ -122,7 +147,10 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         modelConfig: config.modelConfig || get().modelConfig,
         selectedModels: config.selectedModels || {},
         shortcuts: config.shortcuts || {},
-        layout: config.layout || get().layout,
+        // layout 必须与默认值逐字段合并，不能整体替换：
+        // 老版本持久化下来的 layout 里没有 sidebarWidth，整体替换会让它变成
+        // undefined，侧边栏宽度直接塌掉。以后往 layout 加字段同理。
+        layout: { ...get().layout, ...(config.layout || {}) },
         loaded: true
       })
     } catch (err) {

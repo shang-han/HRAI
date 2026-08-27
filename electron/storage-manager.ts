@@ -10,6 +10,13 @@ interface Session {
   updatedAt: string
   messages: Message[]
   workPriority?: WorkPriority
+  /**
+   * 该会话的工作目录（绝对路径）。AI 的读写、命令执行、产物落盘都在这里。
+   * 缺省/空串 = 使用内置工作区（HermesManager.getWorkspacePath()）。
+   * 刻意不在老会话上回填绝对路径：安装目录搬家后，"空 = 内置" 的语义仍然正确，
+   * 而回填过的路径会变成死路径。
+   */
+  workDir?: string
   /** 渠道镜像会话：channel=渠道ID，chatId=渠道会话ID */
   channel?: { channel: string; chatId: string }
   origin?: 'local' | 'channel'
@@ -55,9 +62,20 @@ interface AppConfig {
   layout: {
     sidebarCollapsed: boolean
     inputMode: 'single' | 'multi'
+    /**
+     * 侧边栏像素宽度。可选且不进 getDefaultConfig()：默认值与上下限都由渲染进程
+     * （configStore 的 SIDEBAR_* 常量）持有，主进程只是原样存取，
+     * 不在这里再抄一份魔数。老配置里没有这个键，渲染侧按字段合并补默认值。
+     */
+    sidebarWidth?: number
   }
   announcement: {
     lastReadAt: string | null
+  }
+  /** 工作目录偏好：last=上次用过的（空串=内置工作区），recent=快选历史 */
+  workDir: {
+    last: string
+    recent: string[]
   }
 }
 
@@ -280,24 +298,70 @@ export class StorageManager {
       updatedAt: s.updatedAt,
       messageCount: s.messages.length,
       workPriority: s.workPriority,
+      // 这里是字段白名单，不是 spread：新增会话字段必须显式加进来，
+      // 否则渲染进程永远拿不到（workDir 就属于这一类）
+      workDir: s.workDir || '',
       channel: s.channel,
       origin: s.origin,
       isDefault: !!s.isDefault
     }))
   }
 
-  createSession(name?: string): Session {
+  createSession(name?: string, workDir?: string): Session {
     const session: Session = {
       id: this.generateId(),
       name: name || `会话 ${this.sessions.length + 1}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       messages: [],
-      workPriority: undefined
+      workPriority: undefined,
+      workDir: workDir || undefined
     }
     this.sessions.push(session)
     this.saveSessions()
     return session
+  }
+
+  /**
+   * 改会话工作目录。传空串 = 恢复为内置工作区。
+   * 路径合法性由调用方（main.ts validateWorkDir）负责，这里只落盘。
+   */
+  setSessionWorkDir(sessionId: string, workDir: string): boolean {
+    const session = this.sessions.find(s => s.id === sessionId)
+    if (!session) return false
+    session.workDir = workDir || undefined
+    session.updatedAt = new Date().toISOString()
+    this.saveSessions()
+    return true
+  }
+
+  /**
+   * 记录工作目录偏好。last 无条件更新（含空串 = 上次选的是内置工作区，
+   * 这样"默认沿用上次"在用户特意选回内置时也成立）；recent 只收非空目录，
+   * 最多留 6 条、最新在前。
+   * Windows 路径大小写不敏感，去重必须按小写比，否则同一目录会因为
+   * 用户手输大小写不同而重复出现在快选列表里。
+   */
+  pushRecentWorkDir(dir: string): void {
+    const config: any = this.config
+    if (!config.workDir || typeof config.workDir !== 'object') {
+      config.workDir = { last: '', recent: [] }
+    }
+    if (!Array.isArray(config.workDir.recent)) config.workDir.recent = []
+    config.workDir.last = dir || ''
+    if (dir) {
+      const key = dir.toLowerCase()
+      config.workDir.recent = [dir, ...config.workDir.recent.filter((p: string) => p.toLowerCase() !== key)].slice(0, 6)
+    }
+    this.saveJson(this.configFile, config)
+  }
+
+  getWorkDirPrefs(): { last: string; recent: string[] } {
+    const pref = (this.config as any)?.workDir
+    return {
+      last: typeof pref?.last === 'string' ? pref.last : '',
+      recent: Array.isArray(pref?.recent) ? pref.recent : []
+    }
   }
 
   deleteSession(sessionId: string): boolean {
@@ -707,6 +771,10 @@ export class StorageManager {
       },
       announcement: {
         lastReadAt: null
+      },
+      workDir: {
+        last: '',
+        recent: []
       }
     }
   }

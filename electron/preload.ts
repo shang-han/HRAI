@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
+// 仅类型导入：编译期被完全擦除，不会把主进程的 hermes-manager 打进 preload 包，
+// 用量结构因此只有一份定义（渲染侧的 src/global.d.ts 是另一套项目，只能手抄）。
+import type { SessionUsage } from './hermes-manager'
 
 // 暴露安全的 IPC 接口给渲染进程
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -12,7 +15,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 会话模块
   session: {
     list: () => ipcRenderer.invoke('session:list'),
-    create: (name?: string) => ipcRenderer.invoke('session:create', name),
+    create: (name?: string, workDir?: string) => ipcRenderer.invoke('session:create', name, workDir),
+    setWorkDir: (sessionId: string, workDir: string) => ipcRenderer.invoke('session:setWorkDir', sessionId, workDir),
     delete: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId),
     switch: (sessionId: string) => ipcRenderer.invoke('session:switch', sessionId),
     rename: (sessionId: string, name: string) => ipcRenderer.invoke('session:rename', sessionId, name),
@@ -84,6 +88,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     export: (format: string, content: any, filePath?: string) =>
       ipcRenderer.invoke('file:export', format, content, filePath),
     import: () => ipcRenderer.invoke('file:import'),
+  },
+
+  // 会话工作目录模块
+  workdir: {
+    info: () => ipcRenderer.invoke('workdir:info'),
+    pick: (current?: string) => ipcRenderer.invoke('workdir:pick', current),
+    reveal: (dir?: string) => ipcRenderer.invoke('workdir:reveal', dir),
+  },
+
+  // 上下文占用 / 提示词缓存用量
+  usage: {
+    get: (sessionId: string) => ipcRenderer.invoke('usage:get', sessionId),
+    onUpdate: (callback: (payload: { sessionId: string; usage: any }) => void) => {
+      const listener = (_event: any, payload: any) => callback(payload)
+      ipcRenderer.on('usage:update', listener)
+      return () => ipcRenderer.removeListener('usage:update', listener)
+    },
   },
 
   // 公告模块
@@ -183,7 +204,8 @@ export interface ElectronAPI {
   }
   session: {
     list: () => Promise<any>
-    create: (name?: string) => Promise<any>
+    create: (name?: string, workDir?: string) => Promise<any>
+    setWorkDir: (sessionId: string, workDir: string) => Promise<any>
     delete: (sessionId: string) => Promise<any>
     switch: (sessionId: string) => Promise<any>
     rename: (sessionId: string, name: string) => Promise<any>
@@ -227,6 +249,15 @@ export interface ElectronAPI {
   file: {
     export: (format: string, content: any, filePath?: string) => Promise<any>
     import: () => Promise<any>
+  }
+  workdir: {
+    info: () => Promise<any>
+    pick: (current?: string) => Promise<any>
+    reveal: (dir?: string) => Promise<any>
+  }
+  usage: {
+    get: (sessionId: string) => Promise<SessionUsage | null>
+    onUpdate: (callback: (payload: { sessionId: string; usage: SessionUsage | null }) => void) => () => void
   }
   announcement: {
     check: () => Promise<any>

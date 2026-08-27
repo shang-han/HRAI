@@ -138,14 +138,18 @@ const InputArea: React.FC = () => {
     setAutoHeight(next)
   }, [inputText, manualHeight])
 
-  // 拖动调整输入框高度（向上拉撑高，向下压回缩）；拖过之后接管高度不再自动跳动
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault()
+  // 拖动调整输入框高度（向上拉撑高，向下压回缩）；拖过之后接管高度不再自动跳动。
+  // 用指针捕获而不是 window 上挂 mousemove/mouseup：鼠标在窗口外松开时
+  // mouseup 不会派发到页面，拖动状态会卡住（指针再回来时没按键也跟着走）。
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    const handle = e.currentTarget
+    const pointerId = e.pointerId
     const startY = e.clientY
     const startHeight = inputHeight
     let engaged = false
+    handle.setPointerCapture(pointerId)
     setResizing(true)
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const delta = startY - ev.clientY
       // 3px 死区：避免只想点一下手柄时手抖 1px 就把高度锁进手动模式
       if (!engaged && Math.abs(delta) < 3) return
@@ -153,12 +157,15 @@ const InputArea: React.FC = () => {
       setManualHeight(Math.min(INPUT_MAX_H, Math.max(INPUT_MIN_H, startHeight + delta)))
     }
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('pointercancel', onUp)
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId)
       setResizing(false)
     }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointercancel', onUp)
   }
 
   // 斜杠命令补全
@@ -401,8 +408,10 @@ const InputArea: React.FC = () => {
     }
   }
 
+  // 列宽/左右边界由 .hermes-thread-col 统一（与消息列、空态问候语同一个类），
+  // AI 气泡与本输入框的左右边界因此由构造对齐，不靠两处 padding 手动凑
   return (
-    <div className="shrink-0 w-full max-w-[820px] mx-auto px-4 pb-4 pt-1">
+    <div className="hermes-thread-col shrink-0 pb-4 pt-1">
       {/* 附件预览：图片 + 文本附件 */}
       {(images.length > 0 || textAttachments.length > 0) && (
         <div className="flex gap-2 mb-2 flex-wrap items-center">
@@ -484,7 +493,7 @@ const InputArea: React.FC = () => {
       {/* 输入框高度拖动手柄：悬停/拖动时变主色，双击恢复"跟随内容自动增高" */}
       <div
         className={`hermes-resize-handle flex justify-center pt-1 pb-1.5 cursor-ns-resize select-none ${resizing ? 'is-resizing cursor-grabbing' : ''}`}
-        onMouseDown={startResize}
+        onPointerDown={startResize}
         onDoubleClick={() => setManualHeight(null)}
         title={manualHeight === null ? '拖动调整输入框高度（当前跟随内容自动增高）' : '拖动调整高度，双击恢复自动增高'}
       >
