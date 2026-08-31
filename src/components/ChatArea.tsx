@@ -144,7 +144,7 @@ const ChatArea: React.FC = () => {
           className={`flex message-enter relative items-start ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
           {message.role !== 'user' && (
-            <div className="hermes-msg-avatar">AI</div>
+            <div className="hermes-msg-avatar">H</div>
           )}
           <div
             className={`max-w-[70%] rounded-2xl px-4 py-3 ${
@@ -231,7 +231,7 @@ const ChatArea: React.FC = () => {
       {/* 加载中指示器 */}
       {isLoading && messages[messages.length - 1]?.role === 'user' && (
         <div className="flex justify-start relative items-start message-enter">
-          <div className="hermes-msg-avatar">AI</div>
+          <div className="hermes-msg-avatar">H</div>
           <div className="hermes-glass rounded-2xl px-4 py-3">
             <div className="flex gap-1">
               <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />

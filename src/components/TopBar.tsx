@@ -64,7 +64,12 @@ const MODEL_PRESETS: ModelProvider[] = [
   { id: 'kling-v1', name: '可灵', provider: '快手', type: 'video', apiEndpoint: 'https://api.klingai.com/v1/videos/text2video', apiKey: '', modelName: 'kling-v1', params: { duration: 10 }, enabled: false },
 ]
 
-const TopBar: React.FC = () => {
+/**
+ * visible=false 时只挂载弹窗与全局监听（设置面板/权限审批/公告/更新），
+ * 不渲染顶栏行——近期重点工作/定时任务/公共预设等页面没有顶栏，
+ * 但「设置」入口和权限审批必须在这些页面也能用，所以 TopBar 要常驻。
+ */
+const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const { theme, setTheme, modelConfig, setModelConfig, layout, toggleSidebar } = useConfigStore()
   const { sessions, activeSessionId, setSessionWorkDir } = useSessionStore()
   const { message } = AntApp.useApp()
@@ -223,6 +228,7 @@ const TopBar: React.FC = () => {
 
   return (
     <>
+      {visible && (
       <div className="h-12 flex items-center justify-between px-4 bg-surface">
         <div className="flex gap-3 items-center">
           <button onClick={toggleSidebar} className="md:hidden p-1">
@@ -230,11 +236,17 @@ const TopBar: React.FC = () => {
           </button>
           <span className="text-sm text-inkSecondary">
             当前会话：
-            <strong className="text-ink">{activeSession?.name || '无'}</strong>
+            {/* 草稿会话（点新建后还没发消息）在列表里查不到，显示「新会话」 */}
+            <strong className="text-ink">{activeSession?.name || (activeSessionId ? '新会话' : '无')}</strong>
           </span>
-          {/* 工作目录常驻可见：智能体在哪读写文件必须一眼能看到——
-              权限模式是全局的，auto 模式下 cwd 里的任何文件都可能被改写，
-              把它藏进设置里是不负责任的。点击即改（含上下文重置确认）。 */}
+          {/* 上下文占用率：只有内核报过窗口长度才会渲染，没数据时组件自己返回 null */}
+          {activeSessionId && <ContextMeter sessionId={activeSessionId} />}
+        </div>
+        {/* 右侧：工作目录入口（chip 点击修改 + 文件管理器打开）。
+            工作目录常驻可见：智能体在哪读写文件必须一眼能看到——
+            权限模式是全局的，auto 模式下 cwd 里的任何文件都可能被改写，
+            把它藏进设置里是不负责任的。 */}
+        <div className="flex items-center gap-2">
           {activeSession && (
             <Tooltip title={workDirFull ? `工作目录：${workDirFull}（点击修改）` : '点击选择该会话的工作目录'}>
               <span
@@ -256,11 +268,9 @@ const TopBar: React.FC = () => {
               />
             </Tooltip>
           )}
-          {/* 上下文占用率：只有内核报过窗口长度才会渲染，没数据时组件自己返回 null */}
-          {activeSessionId && <ContextMeter sessionId={activeSessionId} />}
         </div>
-        {/* 模型/渠道/设置/帮助/公告/主题已统一收进菜单栏「设置」，此处不再重复放按钮 */}
       </div>
+      )}
 
       {/* 会话工作目录弹窗（修改已有会话） */}
       <SessionWorkDirModal

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, powerMonitor, screen } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { spawn } from 'child_process'
 import { HermesManager } from './hermes-manager'
 import { StorageManager } from './storage-manager'
 import { ActivationManager } from './activation-manager'
@@ -945,8 +946,91 @@ function registerIpcHandlers() {
     return { success: true, path: check.path }
   })
 
+  // 「在文件管理器中打开」防连点：同一路径短时间内只开一个窗口，
+  // 避免连续点击堆出一排资源管理器窗口
+  let lastReveal: { path: string; at: number } | null = null
+
+  /**
+   * Windows：枚举已打开的资源管理器窗口，同文件夹已开窗则置前激活该窗口，
+   * 没有才新开。explorer.exe / shell.openPath 都会无条件叠开新窗口（实测），
+   * 只能走 Shell.Application COM + SetForegroundWindow。
+   *
+   * 脚本必须落盘后用 -File 执行：-Command 内嵌 C# 里的双引号会被 Windows
+   * 命令行转义弄坏，PowerShell 直接退出码 1（实测）。
+   */
+  const revealInExplorer = (target: string): Promise<{ success: boolean; error?: string }> => {
+    // PowerShell 单引号字符串：路径里的单引号翻倍转义
+    const winPath = target.replace(/'/g, "''")
+    const script = [
+      "$ErrorActionPreference = 'SilentlyContinue'",
+      `$targetPath = '${winPath}'`,
+      "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Win32Activate { [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); }'",
+      '$sh = New-Object -ComObject Shell.Application',
+      '$found = $null',
+      'foreach ($w in $sh.Windows()) { try { if ($w.Document.Folder.Self.Path -ieq $targetPath) { $found = $w; break } } catch { } }',
+      'if ($found -ne $null) { [Win32Activate]::ShowWindow([IntPtr]$found.HWND, 9) | Out-Null; [Win32Activate]::SetForegroundWindow([IntPtr]$found.HWND) | Out-Null }',
+      'else { Start-Process explorer.exe -ArgumentList $targetPath }'
+    ].join('\n')
+    const psFile = path.join(app.getPath('temp'), `hermes-reveal-${process.pid}.ps1`)
+    try {
+      fs.writeFileSync(psFile, script, 'utf-8')
+    } catch (err: any) {
+      return Promise.resolve({ success: false, error: `临时脚本写入失败：${err?.message}` })
+    }
+    return new Promise(resolve => {
+      const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', psFile], {
+        stdio: 'ignore',
+        windowsHide: true
+      })
+      proc.once('error', err => resolve({ success: false, error: err.message }))
+      proc.once('exit', code => {
+        fs.unlink(psFile, () => {})
+        resolve({ success: code === 0 })
+      })
+    })
+  }
+
   ipcMain.handle('workdir:reveal', async (_event, dir?: string) => {
     const target = (dir || '').trim() || hermesManager.getWorkspacePath()
+    const now = Date.now()
+    // 3 秒内同一路径重复请求直接跳过：窗口已经打开，再开就是重复窗口
+    const key = path.resolve(target).toLowerCase()
+    if (lastReveal && lastReveal.path === key && now - lastReveal.at < 3000) {
+      return { success: true }
+    }
+    lastReveal = { path: key, at: now }
+
+    // Windows：先找已开窗的同路径窗口激活，没有才新开
+    if (process.platform === 'win32') {
+      return await revealInExplorer(target)
+    }
+
+    // macOS 用 AppleScript 让 Finder 聚焦已有窗口：同文件夹已开窗则置前激活，
+    // 没有才新开（shell.openPath 每次都开新窗口）。
+    if (process.platform === 'darwin') {
+      const safePath = target.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+      const script = `tell application "Finder"
+  set targetFolder to POSIX file "${safePath}"
+  set found to false
+  repeat with w in windows
+    try
+      if (target of w as text) is (targetFolder as text) then
+        set found to true
+        set index of w to 1
+      end if
+    end try
+  end repeat
+  if not found then open targetFolder
+  activate
+end tell`
+      return new Promise(resolve => {
+        const proc = spawn('osascript', ['-e', script], { stdio: 'ignore' })
+        proc.once('error', err => resolve({ success: false, error: err.message }))
+        proc.once('exit', code => resolve({ success: code === 0 }))
+      })
+    }
+
+    // 其他平台继续用 shell.openPath
     const err = await shell.openPath(target)
     return { success: !err, error: err || undefined }
   })

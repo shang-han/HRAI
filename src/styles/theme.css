@@ -408,7 +408,8 @@ body.hermes-col-resizing * {
   background: var(--fill-glass-strong);
 }
 
-/* 发送按钮：无内容时是灰色小圆，有内容时展开成渐变胶囊 */
+/* 发送按钮：始终保持圆形，只换背景色——
+   无内容灰色 / 有内容渐变 / 发送中红色，不再展开成长条胶囊 */
 .hermes-send-btn {
   display: inline-flex;
   align-items: center;
@@ -420,14 +421,13 @@ body.hermes-col-resizing * {
   background: var(--color-surface-subtle);
   color: var(--color-ink-muted);
   cursor: default;
-  transition: width .28s cubic-bezier(.4, 0, .2, 1), background .28s ease,
-              color .28s ease, box-shadow .28s ease, transform .15s ease;
+  transition: background .28s ease, color .28s ease,
+              box-shadow .28s ease, transform .15s ease;
 }
 .dark .hermes-send-btn {
   background: var(--color-line);
 }
 .hermes-send-btn.is-ready {
-  width: 48px;
   background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
   color: #fff;
   cursor: pointer;

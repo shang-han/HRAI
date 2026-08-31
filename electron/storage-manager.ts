@@ -291,7 +291,7 @@ export class StorageManager {
 
   // ============ 会话管理 ============
   getSessions() {
-    return this.sessions.map(s => ({
+    const list = this.sessions.map(s => ({
       id: s.id,
       name: s.name,
       createdAt: s.createdAt,
@@ -305,6 +305,16 @@ export class StorageManager {
       origin: s.origin,
       isDefault: !!s.isDefault
     }))
+    // 排序：默认会话永远置顶；其余按最近活跃时间倒序——
+    // 新建的会话（updatedAt = 现在）自然排在最上，谁有最新消息谁上浮。
+    // 只对返回的副本排序，不碰落盘数组的原始顺序。
+    list.sort((a, b) => {
+      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
+      const ta = Date.parse(a.updatedAt) || 0
+      const tb = Date.parse(b.updatedAt) || 0
+      return tb - ta
+    })
+    return list
   }
 
   createSession(name?: string, workDir?: string): Session {

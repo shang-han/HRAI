@@ -52,13 +52,15 @@ interface SessionState {
   // Actions
   initSession: () => Promise<void>
   createSession: (name?: string, workDir?: string) => Promise<void>
+  /** 进入"草稿会话"：不弹窗、不落库、不出现在会话列表；首条消息发出时才真正建会话 */
+  startDraftSession: () => void
   deleteSession: (id: string) => Promise<void>
   switchSession: (id: string) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
   /** 改会话工作目录。成功后智能体侧会重开 ACP 会话（上下文重置） */
   setSessionWorkDir: (id: string, workDir: string) => Promise<{ success: boolean; error?: string }>
   refreshMessages: (sessionId: string) => Promise<void>
-  sendMessage: (content: string, images?: string[], intent?: { hint?: string; id?: string }) => Promise<void>
+  sendMessage: (content: string, images?: string[], intent?: { hint?: string; id?: string }, nameHint?: string) => Promise<void>
   addMessage: (message: Message) => void
   updateLastAssistantMessage: (content: string) => void
   stopGenerating: () => void
@@ -79,6 +81,15 @@ function makeUserMessage(content: string, images?: string[]): Message {
     timestamp: new Date().toISOString(),
     images
   }
+}
+
+/** 草稿会话命名：有文字取前 12 个字（开头空格去掉、换行并成空格，超出补 …）；
+    纯附件/图片消息（无文字）由 nameHint 直接提供文件名/图片名 */
+function buildDraftName(content: string, nameHint?: string): string {
+  if (nameHint) return nameHint
+  const text = (content || '').replace(/\n+/g, ' ').trimStart()
+  if (!text) return ''
+  return text.length > 12 ? `${text.slice(0, 12)}...` : text
 }
 
 async function runTurn(
@@ -279,6 +290,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
+  startDraftSession: () => {
+    // 临时 id 只活在内存里：它不在 sessions 数组里，sendMessage 看到
+    // "当前 id 不在列表"就知道这是草稿，第一条消息会先落库建真会话。
+    // 用户切走之后草稿自然蒸发，无残留。
+    set({
+      activeSessionId: `draft-${Date.now().toString(36)}`,
+      messages: [],
+      pendingMessages: [],
+      isLoading: false,
+      isStopping: false
+    })
+  },
+
   deleteSession: async (id: string) => {
     try {
       await window.electronAPI.session.delete(id)
@@ -348,16 +372,31 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content: string, images?: string[], intent?: { hint?: string; id?: string }) => {
+  sendMessage: async (content: string, images?: string[], intent?: { hint?: string; id?: string }, nameHint?: string) => {
     const state = get()
     if (!state.activeSessionId) return
+
+    // 草稿会话（不在会话列表里的临时 id）：第一条消息发出时才真正落库建会话，
+    // 此刻会话列表才出现新条目，名字取首条消息内容
+    if (!state.sessions.some(s => s.id === state.activeSessionId)) {
+      try {
+        const session = await window.electronAPI.session.create(buildDraftName(content, nameHint) || undefined, undefined)
+        const sessions = await window.electronAPI.session.list()
+        set({ sessions, activeSessionId: session.id })
+      } catch (err) {
+        console.error('创建会话失败:', err)
+        return
+      }
+    }
 
     const userMessage = makeUserMessage(content, images)
 
     // 正在回复中：先保存用户消息并显示在聊天里，同时进入本地 FIFO 队列，
     // 当前回合结束后自动发送下一条。
     if (state.isLoading) {
-      await window.electronAPI.session.saveMessage(state.activeSessionId, userMessage).catch(() => {})
+      const sessionId = get().activeSessionId
+      if (!sessionId) return
+      await window.electronAPI.session.saveMessage(sessionId, userMessage).catch(() => {})
       set({
         messages: [...state.messages, userMessage],
         pendingMessages: [

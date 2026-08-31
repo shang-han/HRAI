@@ -8,7 +8,7 @@ import {
   SIDEBAR_DEFAULT_W,
   SIDEBAR_COLLAPSED_W
 } from '../store/configStore'
-import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
+import { workDirLabel } from './SessionWorkDirModal'
 import { Modal, Input, Button, Tooltip } from 'antd'
 import {
   PlusOutlined,
@@ -30,13 +30,12 @@ import {
 } from '@ant-design/icons'
 
 const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; onOpenSchedules: () => void }> = ({ onOpenWork, onOpenTemplates, onOpenSchedules }) => {
-  const { sessions, activeSessionId, createSession, deleteSession, switchSession, renameSession } = useSessionStore()
+  const { sessions, activeSessionId, startDraftSession, deleteSession, switchSession, renameSession } = useSessionStore()
   const { layout, toggleSidebar, setSidebarWidth } = useConfigStore()
   const [searchText, setSearchText] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-  const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState({
     sessions: true,
     workPriority: true,
@@ -132,13 +131,6 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
     setRenameValue('')
   }
 
-  // 新建会话统一走弹窗（名称 + 工作目录），两个 "+" 入口都指向这里。
-  // 名称留空时交给主进程按 `会话 N` 生成，不在前端重复那套编号逻辑。
-  const handleCreateSession = async (name: string, workDir: string) => {
-    await createSession(name || undefined, workDir)
-    setNewSessionOpen(false)
-  }
-
   // 业务导航数据：与公共预设指令库同源（src/data/hr-menu.ts），
   // 改动菜单结构只需维护那份数据文件
   const businessNav = HR_MENU
@@ -149,38 +141,29 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
     window.dispatchEvent(new CustomEvent('open-settings'))
   }
 
-  // 新建会话弹窗在收起态也要能弹出来（收起态的 "+" 是唯一入口），
-  // 所以两个分支各自渲染一次，而不是只挂在展开态那棵树上
-  const newSessionModal = (
-    <SessionWorkDirModal
-      open={newSessionOpen}
-      mode="create"
-      initialName={`会话 ${sessions.length + 1}`}
-      onCancel={() => setNewSessionOpen(false)}
-      onSubmit={handleCreateSession}
-    />
-  )
+  // 新建会话：不弹窗、不落库，直接进入右侧空聊天页（草稿会话），
+  // 第一条消息发出后会话列表才出现新条目
+  const startDraft = () => {
+    startDraftSession()
+  }
 
   if (collapsed) {
     return (
-      <>
-        <aside
-          ref={asideRef}
-          style={{ width: SIDEBAR_COLLAPSED_W }}
-          className="hermes-sidebar bg-surface border-r border-line flex-shrink-0 flex flex-col items-center py-3 gap-3 transition-all duration-300"
-        >
-          <button onClick={toggleSidebar} title="展开侧边栏" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-            <RightOutlined />
-          </button>
-          <button onClick={() => setNewSessionOpen(true)} title="新建会话" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-            <PlusOutlined />
-          </button>
-          <button onClick={openSettings} title="设置" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
-            <SettingOutlined />
-          </button>
-        </aside>
-        {newSessionModal}
-      </>
+      <aside
+        ref={asideRef}
+        style={{ width: SIDEBAR_COLLAPSED_W }}
+        className="hermes-sidebar bg-surface border-r border-line flex-shrink-0 flex flex-col items-center py-3 gap-3 transition-all duration-300"
+      >
+        <button onClick={toggleSidebar} title="展开侧边栏" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+          <RightOutlined />
+        </button>
+        <button onClick={startDraft} title="新建会话" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+          <PlusOutlined />
+        </button>
+        <button onClick={openSettings} title="设置" className="p-2 rounded-lg hover:bg-surfaceSubtle dark:hover:bg-canvas">
+          <SettingOutlined />
+        </button>
+      </aside>
     )
   }
 
@@ -218,7 +201,7 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
             <div className="flex items-center gap-2">
               <button
                 title="新建会话"
-                onClick={e => { e.stopPropagation(); setNewSessionOpen(true) }}
+                onClick={e => { e.stopPropagation(); startDraft() }}
                 className="p-1 rounded hover:bg-canvas text-sm leading-none"
               >
                 <PlusOutlined />
@@ -293,48 +276,6 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
                     </div>
                   </div>
                 ))}
-                </div>
-              )}
-            </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 定时提醒/任务：点击整行直接右侧打开（无展开收起），与公共预设指令库同模式 */}
-        <div
-          className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle cursor-pointer hover:bg-primarySoft transition-colors"
-          onClick={onOpenSchedules}
-          title="在右侧打开定时提醒/任务管理页"
-        >
-          <div className="p-3 bg-primarySoft flex justify-between items-center">
-            <span><BellOutlined /> 定时提醒/任务</span>
-          </div>
-        </div>
-
-        {/* 近期重点工作 */}
-        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
-          <div onClick={() => toggleSection('workPriority')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
-            <span><BookOutlined /> 近期重点工作</span>
-            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.workPriority ? 'rotate-90' : 'rotate-0'}`} /></span>
-          </div>
-          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.workPriority ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-            <div className="overflow-hidden min-h-0">
-            <div
-              className="p-2 cursor-pointer hover:bg-canvas transition-colors"
-              onClick={onOpenWork}
-              title="点击进入重点工作编辑页"
-            >
-              {activeSession?.workPriority ? (
-                <div>
-                  <div className="text-sm font-medium truncate">{activeSession.workPriority.title || '未命名重点工作'}</div>
-                  <div className="text-xs text-inkMuted truncate mt-0.5">
-                    {activeSession.workPriority.background || '（无背景描述）'}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-3">
-                  <div className="text-xs text-inkMuted">未设置重点工作，AI 输出将使用通用背景</div>
-                  <div className="text-xs text-primary mt-1">点击设置 →</div>
                 </div>
               )}
             </div>
@@ -419,6 +360,48 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
           </div>
         </div>
 
+        {/* 近期重点工作 */}
+        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
+          <div onClick={() => toggleSection('workPriority')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
+            <span><BookOutlined /> 近期重点工作</span>
+            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.workPriority ? 'rotate-90' : 'rotate-0'}`} /></span>
+          </div>
+          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.workPriority ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            <div className="overflow-hidden min-h-0">
+            <div
+              className="p-2 cursor-pointer hover:bg-canvas transition-colors"
+              onClick={onOpenWork}
+              title="点击进入重点工作编辑页"
+            >
+              {activeSession?.workPriority ? (
+                <div>
+                  <div className="text-sm font-medium truncate">{activeSession.workPriority.title || '未命名重点工作'}</div>
+                  <div className="text-xs text-inkMuted truncate mt-0.5">
+                    {activeSession.workPriority.background || '（无背景描述）'}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-3">
+                  <div className="text-xs text-inkMuted">未设置重点工作，AI 输出将使用通用背景</div>
+                  <div className="text-xs text-primary mt-1">点击设置 →</div>
+                </div>
+              )}
+            </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 定时提醒/任务：点击整行直接右侧打开（无展开收起），与公共预设指令库同模式 */}
+        <div
+          className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle cursor-pointer hover:bg-primarySoft transition-colors"
+          onClick={onOpenSchedules}
+          title="在右侧打开定时提醒/任务管理页"
+        >
+          <div className="p-3 bg-primarySoft flex justify-between items-center">
+            <span><BellOutlined /> 定时提醒/任务</span>
+          </div>
+        </div>
+
         {/* 公共预设指令库：点击整行直接右侧打开（无展开收起） */}
         <div
           className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle cursor-pointer hover:bg-primarySoft transition-colors"
@@ -466,8 +449,6 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
       >
         <Input value={renameValue} onChange={e => setRenameValue(e.target.value)} />
       </Modal>
-
-      {newSessionModal}
     </aside>
   )
 }

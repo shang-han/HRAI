@@ -182,11 +182,22 @@ const App: React.FC = () => {
         {/* 右侧主区域 */}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           {mainView === 'work' ? (
-            <WorkPriorityView onBack={() => setMainView('chat')} />
+            <>
+              {/* TopBar 常驻：这些页面没有顶栏行，但设置面板/权限审批等
+                  全局弹窗必须挂在这里才能用（visible=false 只挂弹窗不渲染顶栏） */}
+              <TopBar visible={false} />
+              <WorkPriorityView onBack={() => setMainView('chat')} />
+            </>
           ) : mainView === 'templates' ? (
-            <TemplateManagerView readonly={templatesReadonly} onBack={() => setMainView('chat')} />
+            <>
+              <TopBar visible={false} />
+              <TemplateManagerView readonly={templatesReadonly} onBack={() => setMainView('chat')} />
+            </>
           ) : mainView === 'schedules' ? (
-            <ScheduleView onBack={() => setMainView('chat')} />
+            <>
+              <TopBar visible={false} />
+              <ScheduleView onBack={() => setMainView('chat')} />
+            </>
           ) : (
             <>
               {/* Hermes 内核状态警告条（仅会话页面顶部，黄色，未运行时显示） */}

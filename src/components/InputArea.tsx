@@ -37,7 +37,7 @@ const INPUT_MAX_H = 260
 
 const InputArea: React.FC = () => {
   const [inputText, setInputText] = useState('')
-  const [images, setImages] = useState<string[]>([])
+  const [images, setImages] = useState<{ name: string; url: string }[]>([])
   // 文本附件：大文本/JSON/CSV 以附件形式随消息发送（≤50KB 的小文件仍直接进输入框）
   const [textAttachments, setTextAttachments] = useState<{ name: string; content: string }[]>([])
   // 输入框高度：默认跟着内容自动增高；一旦手动拖过手柄就以手动值为准（双击手柄恢复自动）
@@ -196,7 +196,7 @@ const InputArea: React.FC = () => {
     : []
   const showCommandMenu = inputText.startsWith('/') && filteredCommands.length > 0
 
-  // 有内容才算"可发送"：驱动发送按钮从灰色小圆变形成渐变胶囊
+  // 有内容才算"可发送"：驱动发送按钮从灰色圆变为渐变底色（形状不变）
   const canSend = inputText.trim().length > 0 || images.length > 0 || textAttachments.length > 0
 
   // 挂载时消费挂起的填充请求（例如从模板管理页点击条目后返回聊天）
@@ -304,7 +304,9 @@ const InputArea: React.FC = () => {
     // 把导航携带的意图透传给主进程做 skill/工作流装配
     const currentIntent = intent
     setIntent(null)
-    await sendMessage(fullText, images.length > 0 ? images : undefined, currentIntent || undefined)
+    // 草稿会话命名提示：整条消息没有文字时（纯附件/图片），用文件名/图片名做会话名
+    const nameHint = text ? undefined : (attachments[0]?.name || images[0]?.name)
+    await sendMessage(fullText, images.length > 0 ? images.map(img => img.url) : undefined, currentIntent || undefined, nameHint)
   }
 
   const handleStop = async () => {
@@ -369,7 +371,7 @@ const InputArea: React.FC = () => {
       if (file.type.startsWith('image/')) {
         const reader = new FileReader()
         reader.onload = () => {
-          setImages(prev => [...prev, reader.result as string])
+          setImages(prev => [...prev, { name: file.name, url: reader.result as string }])
         }
         reader.readAsDataURL(file)
       }
@@ -406,7 +408,8 @@ const InputArea: React.FC = () => {
         if (file) {
           const reader = new FileReader()
           reader.onload = () => {
-            setImages(prev => [...prev, reader.result as string])
+            // 粘贴的图片没有文件名，占位名用于"纯图片消息"的会话命名
+            setImages(prev => [...prev, { name: '图片', url: reader.result as string }])
           }
           reader.readAsDataURL(file)
         }
@@ -435,7 +438,7 @@ const InputArea: React.FC = () => {
         <div className="flex gap-2 mb-2 flex-wrap items-center">
           {images.map((img, i) => (
             <div key={i} className="relative">
-              <img src={img} alt="" className="w-16 h-16 object-cover rounded-lg border border-line" />
+              <img src={img.url} alt="" className="w-16 h-16 object-cover rounded-lg border border-line" />
               <button
                 onClick={() => removeImage(i)}
                 title="移除图片"
