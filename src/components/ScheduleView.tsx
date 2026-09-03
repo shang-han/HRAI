@@ -138,9 +138,11 @@ const ScheduleView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         kind,
         sessionId
       }
-      // 编辑模式走 update，新建走 create
+      // 编辑模式走 update，新建走 create。
+      // 编辑保存即视为要再次生效：单次任务触发后是停用状态，
+      // 只改时间不重新启用的话永远等不到第二次触发
       const result = editingId
-        ? await window.electronAPI.schedule.update(editingId, payload)
+        ? await window.electronAPI.schedule.update(editingId, { ...payload, enabled: true })
         : await window.electronAPI.schedule.create(payload)
       if (result.success) {
         message.success(editingId ? '已保存修改' : (kind === 'task' ? '定时任务已创建' : '定时提醒已创建'))
@@ -183,7 +185,7 @@ const ScheduleView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const sessionName = (id: string) => sessions.find(s => s.id === id)?.name || '未知会话'
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div className="hermes-chat-canvas flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* 页面头：返回 + 标题 + 新建 */}
       <div className="h-12 flex items-center gap-3 px-4 bg-surface shrink-0">
         <button
@@ -215,7 +217,7 @@ const ScheduleView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           ) : (
             <>
               {/* 待执行 */}
-              <div className="border border-line rounded-xl bg-surfaceSubtle overflow-hidden">
+              <div className="border border-line rounded-xl bg-surface overflow-hidden">
                 <div className="px-3 py-2 text-xs text-inkMuted border-b border-line">待执行（{pending.length}）</div>
                 <div className="p-2 space-y-1">
                   {pending.length === 0 && (
@@ -234,13 +236,13 @@ const ScheduleView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                         <Switch size="small" checked onChange={v => handleToggle(task, v)} />
                         <button
                           onClick={() => openEdit(task)}
-                          className="p-1 rounded text-xs text-inkMuted opacity-0 group-hover:opacity-100 hover:text-primary"
+                          className="p-1 rounded text-xs text-inkMuted hover:text-primary"
                         >
                           <EditOutlined />
                         </button>
                         <button
                           onClick={() => handleDelete(task.id)}
-                          className="p-1 rounded text-xs text-red-500 opacity-0 group-hover:opacity-100"
+                          className="p-1 rounded text-xs text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30"
                         >
                           <DeleteOutlined />
                         </button>
@@ -252,7 +254,7 @@ const ScheduleView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
               {/* 已停用 */}
               {done.length > 0 && (
-                <div className="border border-line rounded-xl bg-surfaceSubtle overflow-hidden">
+                <div className="border border-line rounded-xl overflow-hidden">
                   <div className="px-3 py-2 text-xs text-inkMuted border-b border-line">已停用（{done.length}）</div>
                   <div className="p-2 space-y-1">
                     {done.map(task => (

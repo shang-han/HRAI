@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useSessionStore } from '../store/sessionStore'
 import { HR_MENU } from '../data/hr-menu'
 import {
@@ -18,18 +18,57 @@ import {
   SearchOutlined,
   MessageOutlined,
   BellOutlined,
-  BookOutlined,
-  ApartmentOutlined,
   StarOutlined,
   LeftOutlined,
   RightOutlined,
   FolderOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
-  SettingOutlined
+  SettingOutlined,
+  TeamOutlined,
+  ApartmentOutlined
 } from '@ant-design/icons'
 
-const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; onOpenSchedules: () => void }> = ({ onOpenWork, onOpenTemplates, onOpenSchedules }) => {
+// 丝滑斜分界（参考 WorkBuddy/s-divider.html 调参台）：
+// 分界线由两段三次贝塞尔拼成，但所有控制点的 x 都锁定在中线 xm 上 → 曲线严格单调推进，
+// 不过冲、无鼓包；交接点前后两个控制点与交接点共线，C1 连续，无拼接痕迹、无折角。
+//
+// 形状参数（调参台定下的值，要微调观感只改这五个）：
+const TAB_DIV_SKEW = 30 // 首尾横向错位总量（px）
+const TAB_DIV_FLAT = 0.55 // 中间平直段占比：越大中间越接近垂直
+const TAB_DIV_POS = 0.5 // 分界位置（0.5 = 正中）
+const TAB_DIV_MORPH_MS = 600 // tab 切换时色块滑过去的时长
+const TAB_DIV_LOW_EXTEND = 1.55 // 竖直段下延系数：下段贴合区是上段的 1.55 倍 → 竖线更长、弯钩更靠下
+//
+// 尺寸必须是「实测值」而不是写死的常量：侧边栏默认宽 340（可拖 240~560），
+// 若 viewBox 写死 460，preserveAspectRatio="none" 会把曲线横向压到 74%
+// 而高度不变 —— 非等比压缩，观感会比调参台陡得多，且拖动时比例一直在变。
+// 所以下面 viewBox 用 ResizeObserver 实测的宽高，1:1 渲染，不做任何缩放。
+const r2 = (v: number) => Math.round(v * 100) / 100
+
+const buildTabDiv = (W: number, H: number) => {
+  const skew = TAB_DIV_SKEW
+  const xm = W * TAB_DIV_POS
+  const x0 = xm - skew / 2
+  const x1 = xm + skew / 2
+  const yMid = H / 2
+  // 上下贴合区不再对称：下段按 LOW_EXTEND 拉长 → 中间竖直段整体向下延展
+  const gapUp = H * (0.02 + 0.43 * TAB_DIV_FLAT)
+  const gapDn = gapUp * TAB_DIV_LOW_EXTEND
+  const c1y = (yMid - gapUp) * 0.45
+  const c2y = yMid + gapDn + (H - yMid - gapDn) * 0.55
+  const segUp = `C ${r2(xm)} ${r2(c1y)}, ${r2(xm)} ${r2(yMid - gapUp)}, ${r2(xm)} ${r2(yMid)}`
+  const segDn = `C ${r2(xm)} ${r2(yMid + gapDn)}, ${r2(x1)} ${r2(c2y)}, ${r2(x1)} ${r2(H)}`
+  // 右侧选中时整条曲线镜像（x → W-x）：中线 xm 不动，只有下段的终点/控制点换侧
+  const segDnMir = `C ${r2(xm)} ${r2(yMid + gapDn)}, ${r2(W - x1)} ${r2(c2y)}, ${r2(W - x1)} ${r2(H)}`
+  return {
+    // 两条路径命令结构严格一致（M L C C L Z），CSS 的 d 属性才能插值出切换动画
+    left: `M 0 0 L ${r2(x0)} 0 ${segUp} ${segDn} L 0 ${r2(H)} Z`,
+    right: `M ${r2(W)} 0 L ${r2(W - x0)} 0 ${segUp} ${segDnMir} L ${r2(W)} ${r2(H)} Z`
+  }
+}
+
+const Sidebar: React.FC<{ onOpenTemplates: () => void; onOpenSchedules: () => void }> = ({ onOpenTemplates, onOpenSchedules }) => {
   const { sessions, activeSessionId, startDraftSession, deleteSession, switchSession, renameSession } = useSessionStore()
   const { layout, toggleSidebar, setSidebarWidth } = useConfigStore()
   const [searchText, setSearchText] = useState('')
@@ -38,19 +77,38 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [expandedSections, setExpandedSections] = useState({
     sessions: true,
-    workPriority: true,
-    businessNav: false,
     presets: false,
     templates: false
   })
-  // 业务导航树：一级（中心）与二级（模块）的展开状态，默认只展开第一个中心
-  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({})
+  // 业务导航：中心是切换 tab（只展示当前中心），模块仍可展开收起
+  const [activeNavTab, setActiveNavTab] = useState<string>(HR_MENU[0]?.key || '')
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({})
+  // 三级指令项：记住最近点击的项（点击后保持选中态，跨 tab 互不干扰）；悬停同样显示选中色
+  const [activeLeafKey, setActiveLeafKey] = useState<string | null>(null)
   const collapsed = layout.sidebarCollapsed
   const activeSession = sessions.find(s => s.id === activeSessionId)
 
   const asideRef = useRef<HTMLElement>(null)
   const [resizing, setResizing] = useState(false)
+
+  // 分界色块的实测尺寸：viewBox 用它做 1:1 渲染，避免固定 viewBox 被非等比拉伸。
+  // 拖动侧边栏时宽度连续变化，这里跟着更新，曲线始终按真实像素绘制。
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const [tabsSize, setTabsSize] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = tabsRef.current
+    if (!el) return
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      // 首帧宽度可能为 0（侧边栏收起/未布局），为 0 时不生成路径，
+      // 免得 buildTabDiv(0, 0) 算出一条退化曲线
+      if (r.width > 0 && r.height > 0) setTabsSize({ w: r.width, h: r.height })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [collapsed])
 
   // 拖动调整侧边栏宽度。
   //
@@ -134,6 +192,11 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
   // 业务导航数据：与公共预设指令库同源（src/data/hr-menu.ts），
   // 改动菜单结构只需维护那份数据文件
   const businessNav = HR_MENU
+  // 中心切换按钮图标：数据里的名称自带 emoji（📘/📙），展示时换为贴合业务场景的图标
+  const CENTER_ICONS: Record<string, React.ReactNode> = {
+    人力资源中心: <TeamOutlined />,
+    行政综合中心: <ApartmentOutlined />
+  }
 
   // 底部固定「设置」入口：点击直接打开统一设置面板（TopBar 监听 open-settings 事件），
   // 页面切换在面板左侧导航里进行
@@ -195,7 +258,7 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
       {/* 内容区 */}
       <div className="flex-1 overflow-y-auto scrollbar-hide p-3 space-y-2">
         {/* 会话列表 */}
-        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
+        <div className="border border-line rounded-xl overflow-hidden">
           <div onClick={() => toggleSection('sessions')} className="p-3 bg-primarySoft flex justify-between items-center cursor-pointer">
             <span><MessageOutlined /> 会话列表</span>
             <div className="flex items-center gap-2">
@@ -283,111 +346,133 @@ const Sidebar: React.FC<{ onOpenWork: () => void; onOpenTemplates: () => void; o
           </div>
         </div>
 
-        {/* 业务导航 */}
-        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
-          <div onClick={() => toggleSection('businessNav')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
-            <span><ApartmentOutlined /> 人事-行政业务导航</span>
-            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.businessNav ? 'rotate-90' : 'rotate-0'}`} /></span>
+        {/* 业务导航：与其他菜单目录一致，标题行为主题色浅底；
+            下方一级菜单切换中心，点击哪个 tab 展示哪个中心底下的内容，无整体收起。
+            内容区不加灰色底：展开后的模块/指令项直接落在侧边栏背景上（边框保留） */}
+        <div className="border border-line rounded-xl overflow-hidden">
+          {/* 标题行 tab（参考 WorkBuddy/s-divider.html）：丝滑斜分界 —— 不加描边线，
+              分界本身由两个填充区域相切形成：选中中心主题浅紫、另一侧白底；
+              单条贝塞尔斜 S（无凸起、无拼接痕），切换时区域镜像移动到另一侧 */}
+          <div ref={tabsRef} className="flex bg-surface relative">
+            {businessNav.map(category => {
+              const active = activeNavTab === category.key
+              return (
+                <button
+                  key={category.key}
+                  onClick={() => setActiveNavTab(category.key)}
+                  className={`relative z-10 flex-1 flex items-center justify-center gap-1 text-sm py-3 px-1 transition-colors duration-200 ${
+                    active
+                      ? 'text-primary font-semibold'
+                      : 'text-inkMuted hover:text-inkSecondary'
+                  }`}
+                >
+                  {CENTER_ICONS[category.key]}
+                  <span className="truncate">{category.name.split(/\s+/).slice(1).join(' ') || category.name}</span>
+                </button>
+              )
+            })}
+            {tabsSize.w > 0 && tabsSize.h > 0 && (() => {
+              const div = buildTabDiv(tabsSize.w, tabsSize.h)
+              const p = activeNavTab === businessNav[0]?.key ? div.left : div.right
+              return (
+                <svg
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  viewBox={`0 0 ${r2(tabsSize.w)} ${r2(tabsSize.h)}`}
+                  preserveAspectRatio="none"
+                >
+                  {/* 切换动画：左右两条路径命令结构一致（M L C C L Z），CSS d 属性可插值，
+                      切换时紫块区域直接 morph 滑向另一侧（慢速 ease-in-out）。
+                      拖动侧边栏时必须关掉过渡：宽度连续变化会让 d 不停被插值，
+                      曲线会拖在容器后面"追不上"，产生橡皮筋般的滞后感。 */}
+                  <path
+                    d={p}
+                    fill="var(--color-primary-soft)"
+                    style={{
+                      d: `path("${p}")`,
+                      transition: resizing ? 'none' : `d ${TAB_DIV_MORPH_MS}ms ease-in-out`
+                    }}
+                  />
+                </svg>
+              )
+            })()}
           </div>
-          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.businessNav ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-            <div className="overflow-hidden min-h-0">
-            <div className="p-2">
-              {businessNav.map((category, ci) => {
-                const catOpen = expandedCategories[category.name] ?? (ci === 0)
-                return (
-                  <div key={ci}>
-                    {/* 一级：中心 */}
-                    <div
-                      className="flex items-center justify-between gap-1 font-semibold text-accent mt-2 mb-1 pl-2 pr-1 py-1 text-sm rounded-md cursor-pointer hover:bg-primarySoft"
-                      onClick={() => setExpandedCategories(prev => ({ ...prev, [category.name]: !catOpen }))}
-                    >
-                      <span className="truncate">{category.name}</span>
-                      <CaretRightOutlined className={`shrink-0 text-xs transition-transform duration-300 ${catOpen ? 'rotate-90' : 'rotate-0'}`} />
-                    </div>
-                    {/* 二级：模块 */}
-                    <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${catOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                      <div className="overflow-hidden min-h-0">
-                        {category.modules.map((module, mi) => {
-                          const modOpen = expandedModules[module.name] ?? false
-                          return (
-                            <div key={mi}>
-                              <div
-                                className="flex items-center justify-between gap-1 text-sm font-medium text-inkSecondary py-1 pl-4 pr-1 rounded-md cursor-pointer hover:bg-primarySoft"
-                                onClick={() => setExpandedModules(prev => ({ ...prev, [module.name]: !modOpen }))}
-                              >
-                                <span className="truncate">{module.name}</span>
-                                <CaretRightOutlined className={`shrink-0 text-xs transition-transform duration-300 ${modOpen ? 'rotate-90' : 'rotate-0'}`} />
-                              </div>
-                              {/* 三级：业务指令项 */}
-                              <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${modOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                                <div className="overflow-hidden min-h-0">
-                                  {module.leaves.map((item, ii) => (
-                                    <div
-                                      key={ii}
-                                      className="text-sm py-1 pl-8 pr-2 rounded-md hover:bg-primarySoft cursor-pointer transition-all text-inkMuted hover:text-primary"
-                                      onClick={async () => {
-                                        // 优先取指令库中同分类同名模板内容（在指令库编辑后导航同步生效），
-                                        // 否则用内置提示词
-                                        let text = item.prompt
-                                        try {
-                                          const tpls: any[] = await window.electronAPI.template.list()
-                                          const tpl = tpls.find((t: any) =>
-                                            t.name === item.name && t.category === `${category.key}/${module.name}`
-                                          )
-                                          if (tpl?.content) text = tpl.content
-                                        } catch { /* 模板加载失败时用内置提示词 */ }
-                                        const event = new CustomEvent('fillPrompt', {
-                                          detail: { text, intent: { hint: item.name } }
-                                        })
-                                        window.dispatchEvent(event)
-                                      }}
-                                    >
+          <div className="p-2">
+            {businessNav.filter(c => c.key === activeNavTab).map(category => (
+              <div key={category.key}>
+                {category.modules.map((module, mi) => {
+                    const modOpen = expandedModules[module.name] ?? false
+                    // 模块名自带编号（如 "1.1 招聘管理"）：拆分出徽章数字与显示名
+                    const [modNum, ...modNameParts] = module.name.split(/\s+/)
+                    const modName = modNameParts.join(' ') || module.name
+                    return (
+                      <div key={mi}>
+                        {/* 二级：模块（编号徽章 + 名称 + 条目数，点击整行展开/收起） */}
+                        <div
+                          className="flex items-center gap-2 py-2 -ml-2 pr-1.5 rounded-md cursor-pointer hover:bg-canvas"
+                          onClick={() => setExpandedModules(prev => ({ ...prev, [module.name]: !modOpen }))}
+                          title={modOpen ? '收起' : '展开'}
+                        >
+                          {/* 定位条：展开时显示，紧贴卡片左边框 */}
+                          <span className={`self-stretch w-1 rounded-full bg-primary transition-opacity duration-200 ${modOpen ? 'opacity-100' : 'opacity-0'}`} />
+                          <span className={`shrink-0 min-w-[2rem] text-center text-[11px] font-semibold leading-4 py-0.5 px-1 rounded-md transition-colors ${
+                            modOpen ? 'text-white bg-primary' : 'text-primary bg-primarySoft'
+                          }`}>
+                            {modNum}
+                          </span>
+                          <span className="flex-1 truncate text-sm font-semibold text-ink">{modName}</span>
+                          <span className="shrink-0 text-[10px] font-medium leading-4 py-0.5 px-1.5 text-primary bg-primarySoft rounded-full">
+                            {module.leaves.length}
+                          </span>
+                        </div>
+                        {/* 三级：业务指令项 */}
+                        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${modOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                          <div className="overflow-hidden min-h-0">
+                            {/* 三级：导引竖线 + 圆点 + 名称，鼠标覆盖即显示选中色 */}
+                            <div className="relative ml-3.5 pl-2">
+                              {/* 导引竖线：主色渐到背景色（浅色主题下即白色） */}
+                              <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-[linear-gradient(180deg,var(--color-primary),var(--color-surface))]" />
+                              {module.leaves.map((item, ii) => {
+                                const leafKey = `${category.key}/${module.name}/${item.name}`
+                                const leafActive = activeLeafKey === leafKey
+                                return (
+                                  <div
+                                    key={ii}
+                                    className={`group flex items-center gap-2 text-sm py-1.5 px-2 rounded-md cursor-pointer transition-colors ${
+                                      leafActive ? 'bg-primarySoft' : 'hover:bg-primarySoft'
+                                    }`}
+                                    onClick={async () => {
+                                      setActiveLeafKey(leafKey)
+                                      // 优先取指令库中同分类同名模板内容（在指令库编辑后导航同步生效），
+                                      // 否则用内置提示词
+                                      let text = item.prompt
+                                      try {
+                                        const tpls: any[] = await window.electronAPI.template.list()
+                                        const tpl = tpls.find((t: any) =>
+                                          t.name === item.name && t.category === `${category.key}/${module.name}`
+                                        )
+                                        if (tpl?.content) text = tpl.content
+                                      } catch { /* 模板加载失败时用内置提示词 */ }
+                                      const event = new CustomEvent('fillPrompt', {
+                                        detail: { text, intent: { hint: item.name } }
+                                      })
+                                      window.dispatchEvent(event)
+                                    }}
+                                  >
+                                    <span className={`shrink-0 h-1.5 w-1.5 rounded-full transition-all ${leafActive ? 'h-2 w-2 bg-primary' : 'bg-line group-hover:h-2 group-hover:w-2 group-hover:bg-primary'}`} />
+                                    <span className={`truncate transition-colors ${leafActive ? 'text-primary font-medium' : 'text-inkSecondary group-hover:text-primary'}`}>
                                       {item.name}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
+                                    </span>
+                                  </div>
+                                )
+                              })}
                             </div>
-                          )
-                        })}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 近期重点工作 */}
-        <div className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle">
-          <div onClick={() => toggleSection('workPriority')} className="p-3 bg-primarySoft flex justify-between cursor-pointer">
-            <span><BookOutlined /> 近期重点工作</span>
-            <span className="text-xs"><CaretRightOutlined className={`transition-transform duration-300 ${expandedSections.workPriority ? 'rotate-90' : 'rotate-0'}`} /></span>
-          </div>
-          <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${expandedSections.workPriority ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-            <div className="overflow-hidden min-h-0">
-            <div
-              className="p-2 cursor-pointer hover:bg-canvas transition-colors"
-              onClick={onOpenWork}
-              title="点击进入重点工作编辑页"
-            >
-              {activeSession?.workPriority ? (
-                <div>
-                  <div className="text-sm font-medium truncate">{activeSession.workPriority.title || '未命名重点工作'}</div>
-                  <div className="text-xs text-inkMuted truncate mt-0.5">
-                    {activeSession.workPriority.background || '（无背景描述）'}
-                  </div>
+                    )
+                  })}
                 </div>
-              ) : (
-                <div className="text-center py-3">
-                  <div className="text-xs text-inkMuted">未设置重点工作，AI 输出将使用通用背景</div>
-                  <div className="text-xs text-primary mt-1">点击设置 →</div>
-                </div>
-              )}
-            </div>
-            </div>
+              ))}
           </div>
         </div>
 

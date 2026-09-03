@@ -10,7 +10,6 @@ import ActivationPage from './components/ActivationPage'
 import CompanyOnboardingPage from './components/CompanyOnboardingPage'
 import OfflineBar from './components/OfflineBar'
 import HermesStatusBar from './components/HermesStatusBar'
-import WorkPriorityView from './components/WorkPriorityView'
 import TemplateManagerView from './components/TemplateManagerView'
 import ScheduleView from './components/ScheduleView'
 
@@ -18,8 +17,8 @@ const App: React.FC = () => {
   const [activated, setActivated] = useState<boolean | null>(null)
   const [onboarding, setOnboarding] = useState<boolean | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
-  // 右侧主区域视图：chat=聊天 / work=近期重点工作页 / templates=预设指令库管理页 / schedules=定时提醒任务页
-  const [mainView, setMainView] = useState<'chat' | 'work' | 'templates' | 'schedules'>('chat')
+  // 右侧主区域视图：chat=聊天 / templates=预设指令库管理页 / schedules=定时提醒任务页
+  const [mainView, setMainView] = useState<'chat' | 'templates' | 'schedules'>('chat')
   // 指令库只读模式：输入框入口只能点选填入；编辑/新建只能从侧边栏入口进入
   const [templatesReadonly, setTemplatesReadonly] = useState(false)
   const themeMode = useConfigStore(state => state.theme)
@@ -78,7 +77,7 @@ const App: React.FC = () => {
     }
   }, [themeMode])
 
-  // 切换会话时回到聊天视图（重点工作页只针对当前会话）
+  // 切换会话时回到聊天视图
   useEffect(() => {
     setMainView('chat')
   }, [activeSessionId])
@@ -170,7 +169,6 @@ const App: React.FC = () => {
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧侧边栏 */}
         <Sidebar
-          onOpenWork={() => setMainView('work')}
           onOpenTemplates={() => {
             // 侧边栏入口：完整管理页（可编辑/新建）
             setTemplatesReadonly(false)
@@ -181,14 +179,7 @@ const App: React.FC = () => {
 
         {/* 右侧主区域 */}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
-          {mainView === 'work' ? (
-            <>
-              {/* TopBar 常驻：这些页面没有顶栏行，但设置面板/权限审批等
-                  全局弹窗必须挂在这里才能用（visible=false 只挂弹窗不渲染顶栏） */}
-              <TopBar visible={false} />
-              <WorkPriorityView onBack={() => setMainView('chat')} />
-            </>
-          ) : mainView === 'templates' ? (
+          {mainView === 'templates' ? (
             <>
               <TopBar visible={false} />
               <TemplateManagerView readonly={templatesReadonly} onBack={() => setMainView('chat')} />

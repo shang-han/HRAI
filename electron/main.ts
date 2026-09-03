@@ -240,7 +240,7 @@ ${task.content || ''}`,
       const reminderMessage = {
         id: Date.now().toString(),
         role: 'assistant' as const,
-        content: `📌 定时提醒：${task.title || ''}
+        content: `🔔 定时提醒：${task.title || ''}
 ${task.content || ''}`,
         timestamp: new Date().toISOString()
       }

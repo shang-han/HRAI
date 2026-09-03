@@ -11,7 +11,9 @@ import {
   DeleteOutlined,
   AppstoreOutlined,
   CaretRightOutlined,
-  FolderOutlined
+  FolderOutlined,
+  TeamOutlined,
+  ApartmentOutlined
 } from '@ant-design/icons'
 
 interface Template {
@@ -20,6 +22,12 @@ interface Template {
   category: string
   content: string
   isBuiltin?: boolean
+}
+
+// 中心图标：与主菜单业务导航一致（数据里的名称自带 emoji，展示时替换为贴合场景的图标）
+const CENTER_ICONS: Record<string, React.ReactNode> = {
+  人力资源中心: <TeamOutlined />,
+  行政综合中心: <ApartmentOutlined />
 }
 
 // 分类下拉：按中心分组，另加"未分类"
@@ -123,7 +131,7 @@ const TemplateManagerView: React.FC<{ onBack: () => void; readonly?: boolean }> 
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div className="hermes-chat-canvas flex-1 min-h-0 flex flex-col overflow-hidden">
       {/* 页面头 */}
       <div className="h-12 flex items-center gap-3 px-4 bg-surface shrink-0">
         <button
@@ -165,7 +173,8 @@ const TemplateManagerView: React.FC<{ onBack: () => void; readonly?: boolean }> 
                   onClick={() => setExpandedCenters(prev => ({ ...prev, [c.key]: !open }))}
                 >
                   <CaretRightOutlined className={`text-[10px] transition-transform duration-300 ${open ? 'rotate-90' : 'rotate-0'}`} />
-                  <span className="flex-1 truncate">{c.name}</span>
+                  {CENTER_ICONS[c.key]}
+                  <span className="flex-1 truncate">{c.name.split(/\s+/).slice(1).join(' ') || c.name}</span>
                 </div>
                 <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                   <div className="overflow-hidden min-h-0">
@@ -215,7 +224,11 @@ const TemplateManagerView: React.FC<{ onBack: () => void; readonly?: boolean }> 
             <div className="text-xs text-inkMuted mb-3">
               {readonly
                 ? '点击条目可把指令内容填入输入框。如需新建或编辑模板，请从左侧栏「公共预设指令库」进入。'
-                : '点击条目把指令填入输入框；悬停可用 ✏️ 编辑、🗑 删除。此处修改的模板内容会同步到左侧业务导航的同名条目。'}
+                : (
+                  <>
+                    点击条目可直接编辑；悬停可用 <DeleteOutlined className="text-xs" /> 删除。此处修改的模板内容会同步到左侧业务导航的同名条目。
+                  </>
+                )}
             </div>
             {visible.length === 0 ? (
               <div className="text-center text-sm text-inkMuted py-8">
@@ -227,8 +240,14 @@ const TemplateManagerView: React.FC<{ onBack: () => void; readonly?: boolean }> 
                   <div
                     key={t.id}
                     onClick={() => {
-                      requestFillInput(t.content)
-                      onBack()
+                      // 只读（输入框入口）：点击把指令填入输入框并返回聊天；
+                      // 完整管理模式（主菜单入口）：点击直接进入编辑弹框，不跳回聊天
+                      if (readonly) {
+                        requestFillInput(t.content)
+                        onBack()
+                      } else {
+                        openEdit(t)
+                      }
                     }}
                     className="group flex items-center gap-2 px-3 py-2 border border-line rounded-md bg-surfaceSubtle dark:bg-canvas cursor-pointer hover:border-primary transition-colors"
                   >

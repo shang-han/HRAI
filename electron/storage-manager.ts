@@ -397,7 +397,8 @@ export class StorageManager {
     const session = this.sessions.find(s => s.id === sessionId)
     if (!session) return false
     session.name = name
-    session.updatedAt = new Date().toISOString()
+    // 刻意不刷新 updatedAt：列表排序语义是"谁有最新消息谁在上面"，
+    // 重命名不是消息活动，不该把会话顶到列表最前
     this.saveSessions()
     return true
   }

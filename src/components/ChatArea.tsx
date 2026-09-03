@@ -92,6 +92,27 @@ const ChatArea: React.FC = () => {
     requestAnimationFrame(() => scrollToBottom(false))
   }, [messages[0]?.id])
 
+  // 会话内搜索跳转（TopBar 搜索点结果后派发）：用自己的滚动容器精确滚动，
+  // 滚动后短暂高亮目标消息。偏移用 getBoundingClientRect 差值计算，
+  // 不依赖 offsetParent 链，任何定位结构下都准确。
+  useEffect(() => {
+    const h = (e: Event) => {
+      const id = (e as CustomEvent).detail as string
+      const container = scrollRef.current
+      const el = container?.querySelector(`#hermes-msg-${id}`) as HTMLElement | null
+      if (!container || !el) return
+      const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+      container.scrollTo({
+        top: top - container.clientHeight / 2 + el.clientHeight / 2,
+        behavior: 'smooth'
+      })
+      el.classList.add('hermes-msg-flash')
+      setTimeout(() => el.classList.remove('hermes-msg-flash'), 1800)
+    }
+    window.addEventListener('jump-to-message', h)
+    return () => window.removeEventListener('jump-to-message', h)
+  }, [hasMessages])
+
   if (messages.length === 0) {
     // 空态不抢 flex-1：由 App 里的上下弹性占位把「问候语 + 输入框」整体垂直居中。
     // 允许收缩 + 内部滚动，窗口很矮时问候语自己滚，不会把输入框顶出可视区。
@@ -141,6 +162,7 @@ const ChatArea: React.FC = () => {
       {messages.map((message) => (
         <div
           key={message.id}
+          id={`hermes-msg-${message.id}`}
           className={`flex message-enter relative items-start ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
         >
           {message.role !== 'user' && (

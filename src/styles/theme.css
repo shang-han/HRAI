@@ -811,3 +811,17 @@ body.hermes-col-resizing * {
   overflow-y: auto;
   padding-right: 4px; /* 给滚动条留出间隙 */
 }
+
+/* 会话内搜索跳转：目标消息短暂高亮（TopBar 搜索点击结果后闪一下） */
+.hermes-msg-flash {
+  animation: hermes-msg-flash 1.8s ease;
+}
+@keyframes hermes-msg-flash {
+  0%, 55% {
+    background: rgba(37, 99, 235, 0.16);
+    border-radius: 12px;
+  }
+  100% {
+    background: transparent;
+  }
+}

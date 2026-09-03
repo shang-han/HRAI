@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useConfigStore } from '../store/configStore'
 import { useSessionStore } from '../store/sessionStore'
 import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
+import WorkPriorityModal from './WorkPriorityModal'
+import CompanyProfileSection from './CompanyProfileSection'
 import ContextMeter from './ContextMeter'
 import { App as AntApp, Button, Tooltip, Modal, Tabs, Form, Input, Switch, Select, Alert, Card, Radio, Space, Tag, InputNumber, Slider, Popconfirm, Empty, Divider } from 'antd'
 import {
@@ -14,9 +16,12 @@ import {
   ApiOutlined,
   LinkOutlined,
   QuestionCircleOutlined,
+  TeamOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ThunderboltOutlined,
+  PushpinOutlined,
+  SearchOutlined,
   FolderOutlined,
   FolderOpenOutlined,
   PlusOutlined,
@@ -71,7 +76,7 @@ const MODEL_PRESETS: ModelProvider[] = [
  */
 const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const { theme, setTheme, modelConfig, setModelConfig, layout, toggleSidebar } = useConfigStore()
-  const { sessions, activeSessionId, setSessionWorkDir } = useSessionStore()
+  const { sessions, activeSessionId, setSessionWorkDir, messages } = useSessionStore()
   const { message } = AntApp.useApp()
   // 统一设置面板：侧边栏底部「设置」是唯一入口，每次打开都落在模型接入页；
   // tab 页通过 hermes-tabs-fill 让内容区独立滚动
@@ -94,6 +99,29 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   // 渠道接入当前激活的标签页（底部保存按钮按此触发对应渠道的保存）
   const [channelTabKey, setChannelTabKey] = useState('weixin')
   const [workDirOpen, setWorkDirOpen] = useState(false)
+  // 重点工作编辑弹窗（当前会话）
+  const [wpOpen, setWpOpen] = useState(false)
+  // 会话内搜索：点击搜索图标延展出输入框，实时过滤当前对话消息
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchText, setSearchText] = useState('')
+  // 已展示条数：超过 30 条时下方出现「展示更多」，每次 +30，全部展示完自动隐藏
+  const [searchVisibleCount, setSearchVisibleCount] = useState(30)
+
+  const searchQuery = searchText.trim().toLowerCase()
+  // 全部匹配，最近的在前（倒序）
+  const searchAllResults = searchOpen && searchQuery
+    ? messages.filter(m => m.content.toLowerCase().includes(searchQuery)).reverse()
+    : []
+  const searchResults = searchAllResults.slice(0, searchVisibleCount)
+  const searchHasMore = searchAllResults.length > searchVisibleCount
+
+  // 点击结果：滚动与高亮由 ChatArea 用自己的滚动容器执行
+  // （跨组件 getElementById + scrollIntoView 拿不准滚动容器，改为事件派发）
+  const jumpToMessage = (id: string) => {
+    window.dispatchEvent(new CustomEvent('jump-to-message', { detail: id }))
+    setSearchOpen(false)
+    setSearchText('')
+  }
   // 内置工作区的绝对路径，仅用于胶囊 Tooltip 展示"AI 实际在哪干活"
   const [builtinWorkDir, setBuiltinWorkDir] = useState('')
 
@@ -107,6 +135,15 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
       .then(info => setBuiltinWorkDir(info?.defaultPath || ''))
       .catch(() => { /* 拿不到就只显示"内置工作区"文案，不影响功能 */ })
   }, [])
+
+  // 重点工作弹窗：草稿会话（点新建后还没发消息）未落库，保存必失败，先拦住
+  const openWorkPriority = () => {
+    if (activeSessionId && !activeSession) {
+      message.warning('当前是新会话，请先发送一条消息再设置重点工作')
+      return
+    }
+    setWpOpen(true)
+  }
 
   const handleWorkDirSubmit = async (_name: string, dir: string) => {
     if (!activeSessionId) return
@@ -242,12 +279,84 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
           {/* 上下文占用率：只有内核报过窗口长度才会渲染，没数据时组件自己返回 null */}
           {activeSessionId && <ContextMeter sessionId={activeSessionId} />}
         </div>
-        {/* 右侧：工作目录入口（chip 点击修改 + 文件管理器打开）。
-            工作目录常驻可见：智能体在哪读写文件必须一眼能看到——
-            权限模式是全局的，auto 模式下 cwd 里的任何文件都可能被改写，
-            把它藏进设置里是不负责任的。 */}
+        {/* 右侧：会话内搜索 + 重点工作入口 + 文件管理器打开 */}
         <div className="flex items-center gap-2">
-          {activeSession && (
+          {/* 会话内搜索：点击图标延展出搜索框，实时过滤当前对话消息 */}
+          <div className="relative">
+            {searchOpen ? (
+              <Input
+                size="small"
+                autoFocus
+                value={searchText}
+                onChange={e => { setSearchText(e.target.value); setSearchVisibleCount(30) }}
+                placeholder="搜索当前对话"
+                prefix={<SearchOutlined className="text-inkMuted" />}
+                allowClear
+                className="w-52"
+                onPressEnter={() => { if (searchResults.length > 0) jumpToMessage(searchResults[0].id) }}
+                onBlur={() => { if (!searchText.trim()) setSearchOpen(false) }}
+                onKeyDown={e => { if (e.key === 'Escape') { setSearchOpen(false); setSearchText('') } }}
+              />
+            ) : (
+              <Tooltip title="搜索当前对话">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<SearchOutlined />}
+                  onClick={() => setSearchOpen(true)}
+                />
+              </Tooltip>
+            )}
+            {/* 结果面板：onMouseDown 抢在 blur 之前触发，避免面板先卸载点击落空。
+                列表区自己滚动；「展示更多」固定在面板底部，全部展示完自动隐藏 */}
+            {searchOpen && searchText.trim() && (
+              <div className="absolute top-full right-0 mt-1 w-80 max-h-80 rounded-lg border border-line bg-surface shadow-lg z-50 flex flex-col overflow-hidden">
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {searchResults.length === 0 ? (
+                    <div className="p-3 text-xs text-inkMuted text-center">没有匹配的消息</div>
+                  ) : (
+                    searchResults.map(m => (
+                      <button
+                        key={m.id}
+                        onMouseDown={e => { e.preventDefault(); jumpToMessage(m.id) }}
+                        className="w-full text-left px-3 py-2 hover:bg-surfaceSubtle dark:hover:bg-canvas border-b border-line last:border-b-0"
+                      >
+                        <div className="text-[10px] text-inkMuted mb-0.5">
+                          {m.role === 'user' ? '我' : 'H'} · {(m.timestamp || '').slice(0, 16).replace('T', ' ')}
+                        </div>
+                        <div className="text-xs text-inkSecondary line-clamp-2 break-all">
+                          {m.content.replace(/\s+/g, ' ').slice(0, 80)}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+                {searchHasMore && (
+                  <button
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => setSearchVisibleCount(c => c + 30)}
+                    className="shrink-0 px-3 py-1.5 text-xs text-primary hover:bg-surfaceSubtle dark:hover:bg-canvas border-t border-line text-center"
+                  >
+                    展示更多（还剩 {searchAllResults.length - searchVisibleCount} 条）
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 重点工作入口（仅图标）：当前会话的重点工作，点击弹窗编辑 */}
+          <Tooltip title={activeSession?.workPriority ? `重点工作：${activeSession.workPriority.title || '未命名'}` : '设置当前会话的重点工作'}>
+            <Button
+              size="small"
+              type="text"
+              icon={<PushpinOutlined className={activeSession?.workPriority ? 'text-primary' : undefined} />}
+              onClick={openWorkPriority}
+            />
+          </Tooltip>
+
+          {/* 内置工作区 chip 暂时隐藏（按需恢复，代码保留勿删）。
+              工作目录仍可通过下方文件夹图标在文件管理器中打开。 */}
+          {false && activeSession && (
             <Tooltip title={workDirFull ? `工作目录：${workDirFull}（点击修改）` : '点击选择该会话的工作目录'}>
               <span
                 className="hermes-workdir-chip"
@@ -282,6 +391,9 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
         onSubmit={handleWorkDirSubmit}
       />
 
+      {/* 重点工作编辑弹窗（当前会话） */}
+      <WorkPriorityModal sessionId={wpOpen ? activeSessionId : null} onClose={() => setWpOpen(false)} />
+
       {/* 统一设置面板：菜单栏「设置」的唯一出口，左侧导航 + 右侧内容（参考 WorkBuddy） */}
       <Modal
         title={null}
@@ -300,6 +412,7 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
               { key: 'models', icon: <ApiOutlined />, label: '模型接入' },
               { key: 'channels', icon: <LinkOutlined />, label: '渠道接入' },
               { key: 'theme', icon: <BgColorsOutlined />, label: '主题' },
+              { key: 'company', icon: <TeamOutlined />, label: '企业画像' },
               { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
               { key: 'announcement', icon: <BellOutlined />, label: '系统公告' },
               { key: 'help', icon: <QuestionCircleOutlined />, label: '使用帮助' },
@@ -471,6 +584,9 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
                   ))}
                 </div>
               </div>
+            )}
+            {settingsPage === 'company' && (
+              <CompanyProfileSection />
             )}
             {settingsPage === 'announcement' && (
               <div className="space-y-4">

@@ -35,6 +35,16 @@ const FALLBACK_COMMANDS = [
 const INPUT_MIN_H = 48
 const INPUT_MAX_H = 260
 
+// 每个会话的未发送草稿。只存内存、不落盘：进程重启/关闭即全部清除。
+// 切换会话时快照当前输入到旧会话、恢复新会话的草稿（见组件内 effect）。
+interface SessionDraft {
+  inputText: string
+  images: { name: string; url: string }[]
+  textAttachments: { name: string; content: string }[]
+  intent: { hint?: string; id?: string } | null
+}
+const sessionDrafts = new Map<string, SessionDraft>()
+
 const InputArea: React.FC = () => {
   const [inputText, setInputText] = useState('')
   const [images, setImages] = useState<{ name: string; url: string }[]>([])
@@ -209,17 +219,26 @@ const InputArea: React.FC = () => {
     }
   }, [])
 
-  // 切换会话时清空输入框（避免一份内容出现在每个会话）。
+  // 切换会话时不清空输入：每个会话保留自己的未发送草稿，切回来原样恢复。
+  // 草稿只存内存（进程重启即全部清除），不落盘。
   // 用"上一次会话 ID"对比判断：StrictMode 重复执行 effect 时是幂等的，
   // 不会误清首次挂载时消费到的"待填充内容"。
   const prevSessionIdRef = useRef(activeSessionId)
   useEffect(() => {
-    if (prevSessionIdRef.current === activeSessionId) return
+    const prev = prevSessionIdRef.current
+    if (prev === activeSessionId) return
+    // 快照旧会话当前输入（发送后输入已是空，快照会覆盖旧草稿，
+    // 已发出去的内容不会在切回时复活）
+    if (prev) {
+      sessionDrafts.set(prev, { inputText, images, textAttachments, intent })
+    }
     prevSessionIdRef.current = activeSessionId
-    setInputText('')
-    setImages([])
-    setTextAttachments([])
-    setIntent(null)
+    // 恢复新会话的草稿；没有草稿则清空
+    const draft = activeSessionId ? sessionDrafts.get(activeSessionId) : undefined
+    setInputText(draft?.inputText || '')
+    setImages(draft?.images || [])
+    setTextAttachments(draft?.textAttachments || [])
+    setIntent(draft?.intent || null)
   }, [activeSessionId])
 
   // 监听业务导航的 Prompt 填充事件
