@@ -215,13 +215,16 @@ export class GiteeUpdater {
     const filePath = path.join(updateDir, fileName)
 
     if (!incremental && !info.downloadUrl && info.parts.length > 0) {
-      // Gitee 分卷下载：逐个下载后按顺序合并
+      // Gitee 分卷下载：逐个下载后按顺序合并。
+      // 注意：Gitee API 的资产对象没有 size 字段，part.size 恒为 0，
+      // 所以 offset 累计必须用每个 part 的真实下载字节数（content-length），
+      // 进度条才能跨 part 平滑前进而不是每个 part 都从 0 开始。
       const partPaths: string[] = []
       let downloadedTotal = 0
       for (const part of info.parts) {
         const partPath = `${filePath}.${part.name.match(/part\d+$/i)?.[0] || 'part'}`
-        await this.downloadToFile(part.url, partPath, part.size, downloadedTotal, info.size)
-        downloadedTotal += part.size
+        const actual = await this.downloadToFile(part.url, partPath, part.size, downloadedTotal, info.size)
+        downloadedTotal += actual > 0 ? actual : part.size
         partPaths.push(partPath)
       }
       const out = fs.openSync(filePath, 'w')
@@ -231,7 +234,12 @@ export class GiteeUpdater {
         fs.unlinkSync(partPath)
       }
       fs.closeSync(out)
-      this.onProgress?.({ total: info.size, downloaded: info.size, percent: 100, filePath })
+      this.onProgress?.({
+        total: info.size || downloadedTotal,
+        downloaded: downloadedTotal,
+        percent: 100,
+        filePath
+      })
       return { filePath, updateType: 'full' }
     }
 
@@ -242,7 +250,7 @@ export class GiteeUpdater {
     return { filePath, updateType: incremental ? 'incremental' : 'full' }
   }
 
-  private async downloadToFile(url: string, filePath: string, partSize: number, offsetBase: number, total: number): Promise<void> {
+  private async downloadToFile(url: string, filePath: string, partSize: number, offsetBase: number, total: number): Promise<number> {
     const resp = await fetch(url, { signal: this.downloadAbort?.signal })
     if (!resp.ok || !resp.body) throw new Error(`下载失败：HTTP ${resp.status}`)
 
@@ -258,15 +266,20 @@ export class GiteeUpdater {
       chunks.push(value)
       downloaded += value.length
       const current = offsetBase + downloaded
+      // 总量未知（Gitee 资产没有 size）时用 offsetBase+expected 兜底：
+      // offsetBase 是前面 part 的真实字节数，加上本 part 的 content-length
+      // 恰好就是累计总量，跨 part 进度单调递增
+      const denom = total > 0 ? total : offsetBase + expected
       this.onProgress?.({
         total: total || expected,
         downloaded: current,
-        percent: total > 0 ? Math.min(99, Math.round((current / total) * 100)) : 0,
+        percent: denom > 0 ? Math.min(99, Math.round((current / denom) * 100)) : 0,
         filePath
       })
     }
 
     fs.writeFileSync(filePath, Buffer.concat(chunks))
+    return expected > 0 ? expected : downloaded
   }
 
   /**

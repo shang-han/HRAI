@@ -1,6 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
+import { SkeletonStore } from './format/skeleton-store'
+import type { FormatTemplate } from './format/skeleton-store'
+import { pickFormatTemplate, renderFormatSection } from './format/recall'
+import { getFormatStore } from './format/format-store'
 
 /**
  * 意图路由（P0 隐形内核）
@@ -40,6 +44,18 @@ export interface PreparedIntent {
   intent?: IntentDefinition
   original: string
   sessionId?: string
+  /** 本次装配实际套用的格式模板（P2 第 6 步：供前端展示"套用了什么"，未命中则为空） */
+  formatApplied?: FormatApplied
+}
+
+/** 本次装配实际套用的格式模板摘要（P2 第 6 步） */
+export interface FormatApplied {
+  id: string
+  name: string
+  lifecycle: string
+  intentId?: string
+  /** 主表字段名，供前端展开预览 */
+  columns: string[]
 }
 
 interface IntentLogEntry {
@@ -81,8 +97,12 @@ export class IntentRouter {
   private endedAt = new Set<string>()
   private companyProfile: any = null
   private storageManager: any = null
+  /** 企业文档资产库（knowledge-manager），检索已确认文档注入执行指令 */
+  private knowledgeManager: any = null
   /** 内置工作区绝对路径；会话没单独设工作目录时用它 */
   private defaultWorkDir = ''
+  /** 格式模板库（P2 第 4 步挂载），把用户惯用格式注入 prompt；未初始化则为 null */
+  private formatStore: SkeletonStore | null = null
 
   constructor(logManager: any, storageManager?: any) {
     this.logManager = logManager
@@ -139,10 +159,8 @@ export class IntentRouter {
     }
 
     const intent = match.intent
-    const prompt = this.withWorkPriorityContext(
-      this.buildPrompt(original, intent, match.source, match.matchedBy, session?.workDir || ''),
-      workPriority
-    )
+    const built = this.buildPrompt(original, intent, match.source, match.matchedBy, session?.workDir || '')
+    const prompt = this.withWorkPriorityContext(built.prompt, workPriority)
 
     return {
       taskId: this.makeTaskId(),
@@ -152,7 +170,8 @@ export class IntentRouter {
       matchedBy: match.matchedBy,
       intent,
       original,
-      sessionId
+      sessionId,
+      formatApplied: built.formatApplied ?? undefined
     }
   }
 
@@ -255,10 +274,14 @@ export class IntentRouter {
     source: 'nav' | 'keyword',
     matchedBy: string,
     sessionWorkDir?: string
-  ): string {
+  ): { prompt: string; formatApplied: FormatApplied | null } {
+    const tBuildStart = Date.now()
     const lines: string[] = []
     lines.push('【Hermes HR 业务任务指令】')
     lines.push(`- 业务入口：${intent.category} / ${intent.labels[0]}`)
+    // 协作方式（per-task 强化版）：与 AGENTS.md「动手前先反问」同语义，
+    // 防止被长 outputContract 段落淹没；用户已说「直接做/先出初稿」则跳过。
+    lines.push('- 协作方式：信息不足时先反问 2~4 个关键问题（时间范围/数据来源/范围口径/目标受众），再动手；用户已说"直接做"则跳过反问，缺失信息集中列"待确认字段"。')
     lines.push(`- 意图编号：${intent.id}`)
     lines.push(`- 任务类型：${WORKFLOW_LABEL[intent.workflow] || intent.workflow}`)
     lines.push(`- 识别方式：${source === 'nav' ? '业务导航点击' : '自然语言关键词'}（${matchedBy}）`)
@@ -308,18 +331,105 @@ export class IntentRouter {
       lines.push('- 只在本目录范围内读写，不要改动与本次任务无关的既有文件；若目录下存在 AGENTS.md / README.md，其规则优先级高于本指令中相冲突的表述。')
     }
     lines.push('')
+    this.withKnowledgeAssets(lines, original, intent)
+    const formatApplied = this.withFormatTemplate(lines, original, intent)
     lines.push('【用户原话】')
     lines.push(original)
-    return lines.join('\n')
+    const prompt = lines.join('\n')
+    const tBuildMs = Date.now() - tBuildStart
+    this.logManager?.info?.(`[perf] buildPrompt 装配耗时 ${tBuildMs}ms（prompt ${prompt.length} 字符）`)
+    return { prompt, formatApplied }
+  }
+
+  /** 注入企业文档资产（片段预算 2200 字），没有相关资产时不注入 */
+  private withKnowledgeAssets(lines: string[], original: string, intent: IntentDefinition): void {
+    const query = [original, ...(intent.keywords || []), ...(intent.labels || [])].join(' ')
+    const hits = this.knowledgeManager?.recall(query, 1200) || []
+    if (hits.length === 0) return
+    lines.push('【企业文档资产（仅作参照）】')
+    lines.push('- 以下是与本次任务相关的、历史已确认采纳的文档片段，优先参考其中的结构、口径与术语；若与当前需求冲突，以本次要求为准。')
+    for (const hit of hits) {
+      const when = new Date(hit.mtime).toLocaleDateString('zh-CN')
+      lines.push(`- 《${hit.title}》（${when}）：`)
+      for (const chunk of hit.chunks) {
+        lines.push(`  ${chunk.text}`)
+      }
+    }
+    lines.push('')
+  }
+
+  /** 注入用户惯用格式（P2 第 4 步）。没有相关模板或召回分不足时静默跳过（宁可不套，不可错套）。
+   *  命中时返回模板摘要供前端感知；未命中（或无候选）返回 null（不污染 prompt）。 */
+  private withFormatTemplate(lines: string[], original: string, intent: IntentDefinition): FormatApplied | null {
+    const candidates = this.getFormatCandidates(intent.id)
+    if (candidates.length === 0) return null
+    const result = pickFormatTemplate(candidates, {
+      intentId: intent.id,
+      workflow: intent.workflow,
+      userQuery: original
+    })
+    if (!result.matched || !result.template) return null
+    const section = renderFormatSection(result.template)
+    if (!section) return null
+    // renderFormatSection 返回多行文本（已含【建议套用的格式】标题），逐行压入
+    for (const l of section.split('\n')) lines.push(l)
+    lines.push('')
+
+    // 注意：召回命中**不**在此调 recordUse —— 信号③的 useCount 计数是"又生成 xlsx"才计数（§7），
+    // 否则会把召回灌进 useCount，污染 instance→candidate 升格判定。信号采集是独立的 6C 任务。
+    const t = result.template
+    const sheets = (t.skeleton && t.skeleton.sheets) || []
+    const primary = sheets.find(s => s.isPrimary) || sheets[0]
+    const columns = (primary && primary.columns ? primary.columns : []).map(c => c.key)
+    return {
+      id: t.id,
+      name: t.name,
+      lifecycle: t.lifecycle,
+      intentId: t.intentId,
+      columns
+    }
   }
 
   setCompanyProfile(profile: any): void {
     this.companyProfile = profile || null
   }
 
+  /** 企业文档资产库：由 main.ts 注入（KnowledgeManager），用于检索注入 */
+  setKnowledgeManager(km: any): void {
+    this.knowledgeManager = km || null
+  }
+
   /** 由 main.ts 在启动时注入内置工作区路径（HermesManager.getWorkspacePath()） */
   setDefaultWorkDir(dir: string): void {
     this.defaultWorkDir = dir || ''
+  }
+
+  /** 由 main.ts 在启动时调用（幂等）：初始化格式模板库，失败不影响主流程 */
+  async initFormatStore(): Promise<void> {
+    if (this.formatStore) return
+    try {
+      const store = await getFormatStore()
+      this.formatStore = store
+      this.logManager?.info('IntentRouter: 格式模板库已就绪，可注入惯用格式')
+    } catch (err: any) {
+      this.logManager?.error('IntentRouter: 格式模板库初始化失败，本次会话不注入格式', err)
+      this.formatStore = null
+    }
+  }
+
+  /** 由 main.ts 注入共享单例（与 format:* IPC 共用同一份内存态） */
+  setFormatStore(store: SkeletonStore): void {
+    this.formatStore = store
+  }
+
+  /** 同步取可注入的候选模板（只读，不走异步锁） */
+  private getFormatCandidates(intentId: string): FormatTemplate[] {
+    if (!this.formatStore) return []
+    try {
+      return this.formatStore.getByIntentSync(intentId)
+    } catch {
+      return []
+    }
   }
 
   private makeTaskId(): string {

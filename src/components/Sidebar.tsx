@@ -26,7 +26,8 @@ import {
   CaretRightOutlined,
   SettingOutlined,
   TeamOutlined,
-  ApartmentOutlined
+  ApartmentOutlined,
+  FileExcelOutlined
 } from '@ant-design/icons'
 
 // 丝滑斜分界（参考 WorkBuddy/s-divider.html 调参台）：
@@ -68,7 +69,7 @@ const buildTabDiv = (W: number, H: number) => {
   }
 }
 
-const Sidebar: React.FC<{ onOpenTemplates: () => void; onOpenSchedules: () => void }> = ({ onOpenTemplates, onOpenSchedules }) => {
+const Sidebar: React.FC<{ onOpenTemplates: () => void; onOpenSchedules: () => void; onOpenFormats: () => void }> = ({ onOpenTemplates, onOpenSchedules, onOpenFormats }) => {
   const { sessions, activeSessionId, startDraftSession, deleteSession, switchSession, renameSession } = useSessionStore()
   const { layout, toggleSidebar, setSidebarWidth } = useConfigStore()
   const [searchText, setSearchText] = useState('')
@@ -484,6 +485,17 @@ const Sidebar: React.FC<{ onOpenTemplates: () => void; onOpenSchedules: () => vo
         >
           <div className="p-3 bg-primarySoft flex justify-between items-center">
             <span><BellOutlined /> 定时提醒/任务</span>
+          </div>
+        </div>
+
+        {/* 我的格式：点击整行直接右侧打开（无展开收起） */}
+        <div
+          className="border border-line rounded-xl overflow-hidden bg-surfaceSubtle cursor-pointer hover:bg-primarySoft transition-colors"
+          onClick={onOpenFormats}
+          title="在右侧打开「我的格式」管理页（P2 结构复用：xlsx 的列顺序/类型/公式/口径）"
+        >
+          <div className="p-3 bg-primarySoft flex justify-between items-center">
+            <span><FileExcelOutlined /> 我的格式</span>
           </div>
         </div>
 

@@ -1,4 +1,6 @@
 node_modules/
+# 回归测试套件：esbuild 缓存 + 生成的 xlsx 样本不进版本库（源可再生：tests/fixtures/make-samples.py）
+tests/
 dist/
 dist-electron/
 release/

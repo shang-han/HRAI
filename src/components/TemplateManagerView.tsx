@@ -226,7 +226,7 @@ const TemplateManagerView: React.FC<{ onBack: () => void; readonly?: boolean }> 
                 ? '点击条目可把指令内容填入输入框。如需新建或编辑模板，请从左侧栏「公共预设指令库」进入。'
                 : (
                   <>
-                    点击条目可直接编辑；悬停可用 <DeleteOutlined className="text-xs" /> 删除。此处修改的模板内容会同步到左侧业务导航的同名条目。
+                    点击条目可直接编辑；悬停可用 <EditOutlined className="text-xs" /> 编辑、<DeleteOutlined className="text-xs" /> 删除。此处修改的模板内容会同步到左侧业务导航的同名条目。
                   </>
                 )}
             </div>

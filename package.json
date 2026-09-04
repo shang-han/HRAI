@@ -1,6 +1,6 @@
 {
   "name": "hermes-hr-admin",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Hermes 人事行政一体化智能专家",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "build:mac": "node build-main.mjs && vite build && electron-builder --mac",
     "build:mac:dir": "node build-main.mjs && vite build && electron-builder --mac dir",
     "make:delta": "node scripts/make-delta-package.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit --strict --target ES2020 --module ESNext --moduleResolution bundler --skipLibCheck --allowImportingTsExtensions --esModuleInterop --resolveJsonModule electron/main.ts",
     "publish:gitee": "node scripts/publish-gitee-release.mjs"
   },
   "dependencies": {
