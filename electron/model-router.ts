@@ -221,6 +221,23 @@ export class ModelRouter {
   }
 
   /**
+   * 按 session 取消其全部流式请求。
+   *
+   * chat:stream 每次新建 channel（`chat:stream:${sessionId}:${Date.now()}`），
+   * 无法用单一 channel 反查，故按前缀 `chat:stream:${sessionId}:` 匹配后逐个 abort，
+   * 复用 abort 的销毁逻辑（req.destroy + 从 activeRequests 移除）。
+   */
+  abortBySessionId(sessionId: string): void {
+    const prefix = `chat:stream:${sessionId}:`
+    for (const [channel, req] of [...this.activeRequests]) {
+      if (channel.startsWith(prefix)) {
+        try { req.destroy() } catch { /* ignore */ }
+        this.activeRequests.delete(channel)
+      }
+    }
+  }
+
+  /**
    * 自动路由：根据消息内容判断任务类型，返回对应的模型
    */
   autoRoute(message: string): ModelProvider | null {

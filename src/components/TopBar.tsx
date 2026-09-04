@@ -5,6 +5,7 @@ import SessionWorkDirModal, { workDirLabel } from './SessionWorkDirModal'
 import WorkPriorityModal from './WorkPriorityModal'
 import CompanyProfileSection from './CompanyProfileSection'
 import ContextMeter from './ContextMeter'
+import KnowledgeAssetsView from './KnowledgeAssetsView'
 import { App as AntApp, Button, Tooltip, Modal, Tabs, Form, Input, Switch, Select, Alert, Card, Radio, Space, Tag, InputNumber, Slider, Popconfirm, Empty, Divider } from 'antd'
 import {
   SettingOutlined,
@@ -28,7 +29,8 @@ import {
   DeleteOutlined,
   CheckCircleFilled,
   CloseCircleFilled,
-  CloseOutlined
+  CloseOutlined,
+  FileTextOutlined
 } from '@ant-design/icons'
 
 type ModelType = 'dialogue' | 'image' | 'video' | 'multimodal'
@@ -76,7 +78,9 @@ const MODEL_PRESETS: ModelProvider[] = [
  */
 const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const { theme, setTheme, modelConfig, setModelConfig, layout, toggleSidebar } = useConfigStore()
-  const { sessions, activeSessionId, setSessionWorkDir, messages } = useSessionStore()
+  const { sessions, activeSessionId, setSessionWorkDir, messagesBySession } = useSessionStore()
+  // 当前 active 会话的消息桶（per-session）
+  const messages = messagesBySession[activeSessionId ?? ''] || []
   const { message } = AntApp.useApp()
   // 统一设置面板：侧边栏底部「设置」是唯一入口，每次打开都落在模型接入页；
   // tab 页通过 hermes-tabs-fill 让内容区独立滚动
@@ -413,6 +417,7 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
               { key: 'channels', icon: <LinkOutlined />, label: '渠道接入' },
               { key: 'theme', icon: <BgColorsOutlined />, label: '主题' },
               { key: 'company', icon: <TeamOutlined />, label: '企业画像' },
+              { key: 'knowledge', icon: <FileTextOutlined />, label: '文档资产' },
               { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
               { key: 'announcement', icon: <BellOutlined />, label: '系统公告' },
               { key: 'help', icon: <QuestionCircleOutlined />, label: '使用帮助' },
@@ -448,16 +453,7 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
             {settingsPage === 'settings' && (
               <div className="space-y-4">
                 <div>
-                  <h3 className="font-medium mb-2">日志级别</h3>
-                  <Select defaultValue="info" style={{ width: 200 }} onChange={(v) => window.electronAPI.log.setLevel(v)}>
-                    <Select.Option value="debug">DEBUG</Select.Option>
-                    <Select.Option value="info">INFO</Select.Option>
-                    <Select.Option value="warn">WARN</Select.Option>
-                    <Select.Option value="error">ERROR</Select.Option>
-                  </Select>
-                </div>
-                <Divider />
-                <div>
+                  {/* 日志级别设置暂时隐藏（恢复时把下面的 Select 块放回来即可） */}
                   <h3 className="font-medium mb-2">Gitee 在线升级 {appVersion && <span className="text-xs text-gray-400">当前版本 v{appVersion}</span>}</h3>
                   <div className="space-y-2 mb-2">
                     <Input size="small" value={updateOwner} placeholder="Gitee 用户名/组织名（owner）" onChange={e => setUpdateOwner(e.target.value)} />
@@ -508,6 +504,9 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
                   </Button>
                 </div>
               </div>
+            )}
+            {settingsPage === 'knowledge' && (
+              <KnowledgeAssetsView />
             )}
             {settingsPage === 'models' && (
               <div className="h-full flex flex-col">
@@ -701,17 +700,23 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
         ) : <p>正在检查…</p>}
       </Modal>
 
-      {/* Hermes 权限审批弹窗 */}
+      {/* Hermes 权限审批弹窗 —— 必须明确选允许/拒绝，禁止通过蒙板/X/Esc 误关
+          （误关会触发 onCancel → respond(false) → session 被杀） */}
       <Modal
         title="Hermes 请求执行权限"
         open={!!permissionRequest}
+        mask={true}
+        maskClosable={false}
+        keyboard={false}
+        closable={false}
         onOk={() => {
           if (permissionRequest) window.electronAPI.permission.respond(permissionRequest.requestId, true)
           setPermissionRequest(null)
         }}
         onCancel={() => {
-          if (permissionRequest) window.electronAPI.permission.respond(permissionRequest.requestId, false)
-          setPermissionRequest(null)
+          // 防御性保留：maskClosable/keyboard/closable 已全关，正常情况下不会触发；
+          // 万一未来 AntD 新增触发路径，至少不会误杀 session —— 什么都不做，60s 自动超时兜底
+          console.warn('[permission] onCancel 触发但已被禁用副作用，依赖 60s 自动超时')
         }}
         okText="允许一次"
         cancelText="拒绝"
@@ -726,6 +731,7 @@ const TopBar: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
             {permissionRequest.command}
           </div>
         )}
+        <p className="text-xs text-gray-400 mt-2">需明确选择"允许一次"或"拒绝"，60 秒未响应会自动拒绝。</p>
       </Modal>
 
       {/* 公告弹窗 */}

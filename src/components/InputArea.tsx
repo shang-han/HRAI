@@ -59,7 +59,10 @@ const InputArea: React.FC = () => {
   const [showRichFormatWarning, setShowRichFormatWarning] = useState(false)
   const [commands, setCommands] = useState<any[]>(FALLBACK_COMMANDS)
   const [commandIndex, setCommandIndex] = useState(0)
-  const { sendMessage, isLoading, pendingMessages, activeSessionId } = useSessionStore()
+  const { sendMessage, loadingBySession, pendingBySession, activeSessionId } = useSessionStore()
+  // 当前 active 会话的「正在生成」与「排队中」状态（per-session 桶）
+  const isLoading = !!loadingBySession[activeSessionId ?? '']
+  const pendingMessages = pendingBySession[activeSessionId ?? ''] || []
   const { modelConfig, selectedModels, setSelectedModel, clearSelectedModel } = useConfigStore()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -287,11 +290,11 @@ const InputArea: React.FC = () => {
       const store = useSessionStore.getState()
 
       if (cmd === '/stop') {
-        // 本地停止：清空队列并通知 Hermes 取消当前回合
-        store.stopGenerating()
+        // 本地停止：清空队列并通知 Hermes 取消当前回合（只停当前 active 会话）
+        store.stopGenerating(store.activeSessionId ?? undefined)
       } else if (cmd === '/new' || cmd.startsWith('/new ')) {
         // 新会话：先停止当前生成并清空队列，再创建新的本地会话
-        store.stopGenerating()
+        store.stopGenerating(store.activeSessionId ?? undefined)
         await store.createSession()
       } else if (store.activeSessionId) {
         await window.electronAPI.chat.command(text, store.activeSessionId)
@@ -325,6 +328,15 @@ const InputArea: React.FC = () => {
     setIntent(null)
     // 草稿会话命名提示：整条消息没有文字时（纯附件/图片），用文件名/图片名做会话名
     const nameHint = text ? undefined : (attachments[0]?.name || images[0]?.name)
+    // P1-2 隐式接受：上一条消息套用了格式、用户没点「本次不套用」、现在又发新消息
+    // = 未拒绝 = 接受（§7 信号④）。fire-and-forget：失败只 warn，绝不挡住消息发送。
+    const pendingFormat = useSessionStore.getState().pendingFormatAccept
+    if (pendingFormat) {
+      useSessionStore.getState().clearPendingFormatAccept()
+      window.electronAPI.format.accept(pendingFormat.id).catch((e: unknown) => {
+        console.warn('格式模板隐式接受记录失败:', e)
+      })
+    }
     await sendMessage(fullText, images.length > 0 ? images.map(img => img.url) : undefined, currentIntent || undefined, nameHint)
   }
 

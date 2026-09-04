@@ -55,7 +55,7 @@ declare global {
           Promise<{ success: boolean; content?: string; error?: string }>
         stream: (message: string, sessionId: string, modelOverride?: string, images?: string[], intent?: { hint?: string; id?: string }) =>
           Promise<{ channel: string }>
-        stop: () => Promise<boolean>
+        stop: (sessionId?: string) => Promise<boolean>
         command: (command: string, sessionId: string) =>
           Promise<{ success: boolean; error?: string }>
         onStreamData: (channel: string, callback: (data: { type: 'chunk' | 'done' | 'error'; data?: string }) => void) =>
@@ -76,6 +76,28 @@ declare global {
         delete: (id: string) => Promise<boolean>
         import: (filePath: string) => Promise<{ success: boolean; templates?: any[]; error?: string }>
         export: (filePath: string) => Promise<{ success: boolean; error?: string }>
+      }
+      // 格式模板库（P2 结构复用）。删除=归档，导入冲突并存改名
+      format: {
+        list: (includeArchived?: boolean) => Promise<any[]>
+        get: (id: string) => Promise<any>
+        preview: (id: string) => Promise<any>
+        candidates: (dir?: string) => Promise<Array<{ filePath: string; fileName: string; skeleton: any }>>
+        extract: (filePath: string) => Promise<{ ok: boolean; reason?: string; skeleton?: any }>
+        save: (input: any) => Promise<any>
+        update: (id: string, patch: any) => Promise<any>
+        delete: (id: string) => Promise<boolean>
+        reject: (id: string) => Promise<any>
+        /** P1-2 隐式接受：套用后未拒绝且继续发消息时触发（acceptCount++，可升 active） */
+        accept: (id: string) => Promise<any>
+        // 用户取消弹框时返回 { success: false }，因此这里是可辨识联合
+        exportAll: () => Promise<{ success: boolean; count?: number; message?: string }>
+        importAll: () => Promise<
+          { success: false; message: string } |
+          { imported: number; skipped: number; renamed: Array<{ id: string; name: string }>; overwritten: string[]; conflicts: any[]; unresolved: string[]; errors: string[] }
+        >
+        /** P2 第 6 步：主进程 prepare() 命中格式时推送一次 */
+        onApplied: (callback: (payload: FormatAppliedPayload) => void) => () => void
       }
       schedule: {
         list: () => Promise<Array<{ id: string; title: string; content: string; dueAt: string; repeat: 'none' | 'daily' | 'weekly' | 'monthly'; kind: 'reminder' | 'task'; sessionId: string; enabled: boolean; lastFiredAt?: string | null; createdAt: string }>>
@@ -99,6 +121,24 @@ declare global {
         get: (sessionId: string) => Promise<SessionUsage | null>
         /** usage 为 null 表示该会话的智能体上下文已被丢弃（删会话/改工作目录） */
         onUpdate: (callback: (payload: { sessionId: string; usage: SessionUsage | null }) => void) => () => void
+      }
+      knowledge: {
+        list: () => Promise<Array<{
+          id: string
+          fileName: string
+          ext: string
+          size: number
+          mtime: number
+          sessionId?: string
+          addedAt: string
+          title: string
+          keywords: string[]
+          totalChars: number
+        }>>
+        /** 列出会话产出目录 output/ 下的候选文件（返回按修改时间倒序） */
+        candidates: (sessionId?: string) => Promise<Array<{ path: string; fileName: string; ext: string; size: number; mtime: number }>>
+        add: (filePath: string, sessionId?: string) => Promise<{ success: boolean; asset?: any; error?: string }>
+        remove: (id: string) => Promise<{ success: boolean }>
       }
       announcement: {
         check: () => Promise<{ hasNew: boolean; content: string }>
@@ -131,6 +171,8 @@ declare global {
       }
       permission: {
         onRequest: (callback: (data: { requestId: number; title: string; command: string; description: string }) => void) => () => void
+        /** 审批结束（用户点了允许/拒绝，或主进程超时自动拒绝）时推一次 */
+        onResolved: (callback: (data: { requestId: number }) => void) => () => void
         respond: (requestId: number, allow: boolean) => Promise<boolean>
       }
       update: {
@@ -152,6 +194,19 @@ declare global {
         scanPoll: (channel: 'weixin' | 'wecom' | 'dingtalk' | 'feishu', session: string) => Promise<any>
         onTranscript: (callback: (data: { sessionId: string; channel: string; chatId: string; messages: Array<{ id: string; role: string; content: string; timestamp: string }> }) => void) => () => void
       }
+    }
+  }
+
+  /** P2 第 6 步：format:applied 推送载荷 —— 本次装配实际套用的格式模板 */
+  interface FormatAppliedPayload {
+    sessionId: string
+    formatApplied: {
+      id: string
+      name: string
+      lifecycle: string
+      intentId?: string
+      /** 主表字段名，供展开预览 */
+      columns: string[]
     }
   }
 }

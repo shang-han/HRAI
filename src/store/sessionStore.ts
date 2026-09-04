@@ -44,10 +44,20 @@ interface Session {
 interface SessionState {
   sessions: Session[]
   activeSessionId: string | null
-  messages: Message[]
-  pendingMessages: PendingMessage[]
-  isLoading: boolean
-  isStopping: boolean
+  /** 每个会话独立的消息桶：key = sessionId。切会话互不污染。 */
+  messagesBySession: Record<string, Message[]>
+  /** 每个会话独立的待发送队列（连续发送）。 */
+  pendingBySession: Record<string, PendingMessage[]>
+  /** 每个会话独立的「正在生成」标记。 */
+  loadingBySession: Record<string, boolean>
+  /** 每个会话独立的「正在停止」标记。 */
+  stoppingBySession: Record<string, boolean>
+  /**
+   * P2 P1-2（隐式接受）：本次装配套用了某格式模板、用户尚未点「本次不套用」。
+   * 用户继续发下一条消息 = 未拒绝 = 隐式接受（InputArea 发送前 fire-and-forget 记录）。
+   * 点拒绝或切换会话时清除。
+   */
+  pendingFormatAccept: { id: string } | null
 
   // Actions
   initSession: () => Promise<void>
@@ -63,7 +73,11 @@ interface SessionState {
   sendMessage: (content: string, images?: string[], intent?: { hint?: string; id?: string }, nameHint?: string) => Promise<void>
   addMessage: (message: Message) => void
   updateLastAssistantMessage: (content: string) => void
-  stopGenerating: () => void
+  stopGenerating: (sessionId?: string) => void
+  /** P1-2：套用推送命中时挂起待隐式接受的模板 id */
+  setPendingFormatAccept: (payload: { id: string }) => void
+  /** P1-2：用户点拒绝 / 切换会话 / 发送时已消费 —— 清除挂起状态 */
+  clearPendingFormatAccept: () => void
   refreshSessions: () => Promise<void>
   applyChannelTranscript: (data: {
     sessionId: string
@@ -92,6 +106,27 @@ function buildDraftName(content: string, nameHint?: string): string {
   return text.length > 12 ? `${text.slice(0, 12)}...` : text
 }
 
+// ---- per-session 读写小工具：所有对会话桶的访问都走这里，避免裸读全局字段 ----
+
+function readMessages(state: SessionState, sessionId: string | null): Message[] {
+  if (!sessionId) return []
+  return state.messagesBySession[sessionId] || []
+}
+
+function readPending(state: SessionState, sessionId: string | null): PendingMessage[] {
+  if (!sessionId) return []
+  return state.pendingBySession[sessionId] || []
+}
+
+function appendMessages(
+  set: any,
+  get: () => SessionState,
+  sessionId: string,
+  messages: Message[]
+): void {
+  set({ messagesBySession: { ...get().messagesBySession, [sessionId]: messages } })
+}
+
 async function runTurn(
   set: any,
   get: () => SessionState,
@@ -103,15 +138,19 @@ async function runTurn(
   const state = get()
   const sessionId = state.activeSessionId
   if (!sessionId) {
-    set({ isLoading: false })
     return
   }
 
+  const curMsgs = readMessages(get(), sessionId)
+
   if (userMessage) {
     await window.electronAPI.session.saveMessage(sessionId, userMessage).catch(() => {})
-    set({ messages: [...state.messages, userMessage], isLoading: true })
+    set({
+      messagesBySession: { ...get().messagesBySession, [sessionId]: [...curMsgs, userMessage] },
+      loadingBySession: { ...get().loadingBySession, [sessionId]: true }
+    })
   } else {
-    set({ isLoading: true })
+    set({ loadingBySession: { ...get().loadingBySession, [sessionId]: true } })
   }
 
   // 安全看门狗：180 秒后仍未结束则强制复位，防止输入框被永久锁定
@@ -135,19 +174,23 @@ async function runTurn(
         content: `⚠️ ${(result as any).error}`,
         timestamp: new Date().toISOString()
       }
-      await window.electronAPI.session.saveMessage(sessionId, assistantMessage)
-      set({ messages: [...get().messages, assistantMessage], isLoading: false })
-      await drainNext(set, get)
+      await window.electronAPI.session.saveMessage(sessionId, assistantMessage).catch(() => {})
+      appendMessages(set, get, sessionId, [...readMessages(get(), sessionId), assistantMessage])
+      set({ loadingBySession: { ...get().loadingBySession, [sessionId]: false } })
+      await drainNext(set, get, sessionId)
       return
     }
 
     watchdog = setTimeout(() => {
       const s = get()
-      if (s.isLoading || s.isStopping) {
+      if (s.loadingBySession[sessionId] || s.stoppingBySession[sessionId]) {
         // 超时看门狗：主动取消 Hermes 回合，避免界面复位后 ACP 仍在运行，
         // 下一条消息被当成 active-turn redirect。
-        window.electronAPI.chat.stop().catch(() => {})
-        set({ isLoading: false, isStopping: false })
+        window.electronAPI.chat.stop(sessionId).catch(() => {})
+        set({
+          loadingBySession: { ...s.loadingBySession, [sessionId]: false },
+          stoppingBySession: { ...s.stoppingBySession, [sessionId]: false }
+        })
       }
     }, 180000)
 
@@ -159,59 +202,73 @@ async function runTurn(
       timestamp: new Date().toISOString()
     }
 
-    set({
-      messages: [...get().messages, assistantMessage]
-    })
+    appendMessages(set, get, sessionId, [...readMessages(get(), sessionId), assistantMessage])
 
     // 监听流式数据
     const cleanup = window.electronAPI.chat.onStreamData(result.channel, async (data: any) => {
       if (data.type === 'chunk') {
         // 已停止生成则忽略后续内容
-        if (get().isStopping) return
-        const currentMessages = get().messages
+        if (get().stoppingBySession[sessionId]) return
+        const currentMessages = readMessages(get(), sessionId)
         const lastMsg = currentMessages[currentMessages.length - 1]
         if (lastMsg && lastMsg.role === 'assistant') {
           lastMsg.content += data.data
-          set({ messages: [...currentMessages] })
+          appendMessages(set, get, sessionId, [...currentMessages])
         }
       } else if (data.type === 'thinking') {
-        if (get().isStopping) return
-        const currentMessages = get().messages
+        if (get().stoppingBySession[sessionId]) return
+        const currentMessages = readMessages(get(), sessionId)
         const lastMsg = currentMessages[currentMessages.length - 1]
         if (lastMsg && lastMsg.role === 'assistant') {
           lastMsg.thinking = (lastMsg.thinking || '') + data.data
-          set({ messages: [...currentMessages] })
+          appendMessages(set, get, sessionId, [...currentMessages])
         }
       } else if (data.type === 'done') {
         // 停止生成时不保存半截内容，但必须清理状态
-        if (!get().isStopping) {
-          const currentMessages = get().messages
+        if (!get().stoppingBySession[sessionId]) {
+          const currentMessages = readMessages(get(), sessionId)
           const lastMsg = currentMessages[currentMessages.length - 1]
           if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
             await window.electronAPI.session.saveMessage(sessionId, lastMsg).catch(() => {})
           }
         }
-        set({ isLoading: false, isStopping: false })
+        set({
+          loadingBySession: { ...get().loadingBySession, [sessionId]: false },
+          stoppingBySession: { ...get().stoppingBySession, [sessionId]: false }
+        })
         clearWatchdog()
         cleanup()
-        await drainNext(set, get)
+        await drainNext(set, get, sessionId)
       } else if (data.type === 'error') {
-        if (!get().isStopping) {
-          const currentMessages = get().messages
+        if (!get().stoppingBySession[sessionId]) {
+          const currentMessages = readMessages(get(), sessionId)
           const lastMsg = currentMessages[currentMessages.length - 1]
           if (lastMsg && lastMsg.role === 'assistant') {
             lastMsg.content = `⚠️ 错误: ${data.data}`
-            set({ messages: [...currentMessages] })
+            appendMessages(set, get, sessionId, [...currentMessages])
           }
         }
-        set({ isLoading: false, isStopping: false })
+        set({
+          loadingBySession: { ...get().loadingBySession, [sessionId]: false },
+          stoppingBySession: { ...get().stoppingBySession, [sessionId]: false }
+        })
         clearWatchdog()
         cleanup()
-        await drainNext(set, get)
+        await drainNext(set, get, sessionId)
       }
     })
   } catch (err: any) {
-    // 非流式回退
+    // 非流式回退：流式通道建立失败时兜底。这条路径会阻塞等完整响应，
+    // 期间前端一个字都不出 —— 必须明确告诉用户已切模式，否则只会觉得"AI 卡死"。
+    appendMessages(set, get, sessionId, [
+      ...readMessages(get(), sessionId),
+      {
+        id: `fallback-${Date.now()}`,
+        role: 'assistant' as const,
+        content: '⚠️ 流式连接失败，已切换为**非流式模式**：本次需要等模型生成完整回复后一次性显示，期间不会逐字输出。若长时间无响应，可在「模型接入」中换用更快的模型。',
+        timestamp: new Date().toISOString()
+      }
+    ])
     const result = await window.electronAPI.chat.send(content, sessionId, undefined, images, intent)
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
@@ -221,39 +278,43 @@ async function runTurn(
     }
 
     await window.electronAPI.session.saveMessage(sessionId, assistantMessage)
-    set({
-      messages: [...get().messages, assistantMessage],
-      isLoading: false
-    })
+    appendMessages(set, get, sessionId, [...readMessages(get(), sessionId), assistantMessage])
+    set({ loadingBySession: { ...get().loadingBySession, [sessionId]: false } })
     clearWatchdog()
-    await drainNext(set, get)
+    await drainNext(set, get, sessionId)
   }
 }
 
-async function drainNext(set: any, get: () => SessionState): Promise<void> {
+async function drainNext(set: any, get: () => SessionState, sessionId: string): Promise<void> {
   const state = get()
-  if (state.isStopping) {
-    set({ isLoading: false, isStopping: false, pendingMessages: [] })
+  if (state.stoppingBySession[sessionId]) {
+    set({
+      loadingBySession: { ...state.loadingBySession, [sessionId]: false },
+      stoppingBySession: { ...state.stoppingBySession, [sessionId]: false },
+      pendingBySession: { ...state.pendingBySession, [sessionId]: [] }
+    })
     return
   }
 
-  if (state.pendingMessages.length === 0) {
-    set({ isLoading: false })
+  const pendings = readPending(state, sessionId)
+  if (pendings.length === 0) {
+    set({ loadingBySession: { ...state.loadingBySession, [sessionId]: false } })
     return
   }
 
-  const [next, ...rest] = state.pendingMessages
-  set({ pendingMessages: rest })
+  const [next, ...rest] = pendings
+  set({ pendingBySession: { ...state.pendingBySession, [sessionId]: rest } })
   await runTurn(set, get, next.content, next.images, null, next.intent)
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
-  messages: [],
-  pendingMessages: [],
-  isLoading: false,
-  isStopping: false,
+  messagesBySession: {},
+  pendingBySession: {},
+  loadingBySession: {},
+  stoppingBySession: {},
+  pendingFormatAccept: null,
 
   initSession: async () => {
     try {
@@ -263,16 +324,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         const activeId = sessions[0].id
         set({ activeSessionId: activeId })
         const messages = await window.electronAPI.session.getMessages(activeId)
-        set({ messages })
+        set({ messagesBySession: { ...get().messagesBySession, [activeId]: messages } })
       }
     } catch (err) {
       console.error('初始化会话失败:', err)
     }
   },
 
-  stopGenerating: () => {
-    window.electronAPI.chat.stop().catch(() => {})
-    set({ isStopping: true, isLoading: false, pendingMessages: [] })
+  stopGenerating: (sessionId?: string) => {
+    const id = sessionId ?? get().activeSessionId ?? undefined
+    // 只停指定会话（默认当前 active）；不传 id 走全局停止（兼容旧调用方）。
+    window.electronAPI.chat.stop(id).catch(() => {})
+    if (id) {
+      set({
+        stoppingBySession: { ...get().stoppingBySession, [id]: true },
+        loadingBySession: { ...get().loadingBySession, [id]: false },
+        pendingBySession: { ...get().pendingBySession, [id]: [] }
+      })
+    }
   },
 
   createSession: async (name?: string, workDir?: string) => {
@@ -282,8 +351,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({
         sessions,
         activeSessionId: session.id,
-        messages: [],
-        pendingMessages: []
+        messagesBySession: { ...get().messagesBySession, [session.id]: [] },
+        pendingBySession: { ...get().pendingBySession, [session.id]: [] }
       })
     } catch (err) {
       console.error('创建会话失败:', err)
@@ -294,12 +363,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // 临时 id 只活在内存里：它不在 sessions 数组里，sendMessage 看到
     // "当前 id 不在列表"就知道这是草稿，第一条消息会先落库建真会话。
     // 用户切走之后草稿自然蒸发，无残留。
+    // 为草稿会话也建好自己的消息/加载/停止桶，切回草稿时能读到草稿期间写入的内容。
+    const draftId = `draft-${Date.now().toString(36)}`
     set({
-      activeSessionId: `draft-${Date.now().toString(36)}`,
-      messages: [],
-      pendingMessages: [],
-      isLoading: false,
-      isStopping: false
+      activeSessionId: draftId,
+      messagesBySession: { ...get().messagesBySession, [draftId]: [] },
+      pendingBySession: { ...get().pendingBySession, [draftId]: [] },
+      loadingBySession: { ...get().loadingBySession, [draftId]: false },
+      stoppingBySession: { ...get().stoppingBySession, [draftId]: false }
     })
   },
 
@@ -313,13 +384,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (state.activeSessionId === id) {
         const newActiveId = sessions[0]?.id || null
         newState.activeSessionId = newActiveId
-        newState.pendingMessages = []
+        // 清掉被删会话的桶（避免无限膨胀）；其余会话的桶保持不变
+        const messagesBySession = { ...state.messagesBySession }
+        const pendingBySession = { ...state.pendingBySession }
+        const loadingBySession = { ...state.loadingBySession }
+        const stoppingBySession = { ...state.stoppingBySession }
+        delete messagesBySession[id]
+        delete pendingBySession[id]
+        delete loadingBySession[id]
+        delete stoppingBySession[id]
         if (newActiveId) {
           const messages = await window.electronAPI.session.getMessages(newActiveId)
-          newState.messages = messages
-        } else {
-          newState.messages = []
+          messagesBySession[newActiveId] = messages
         }
+        newState.messagesBySession = messagesBySession
+        newState.pendingBySession = pendingBySession
+        newState.loadingBySession = loadingBySession
+        newState.stoppingBySession = stoppingBySession
       }
 
       set(newState)
@@ -331,8 +412,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   switchSession: async (id: string) => {
     try {
       await window.electronAPI.session.switch(id)
-      const messages = await window.electronAPI.session.getMessages(id)
-      set({ activeSessionId: id, messages, pendingMessages: [] })
+      const state = get()
+      // 仅切换 activeSessionId：旧会话的 loading/stopping/pending 保持不动，
+      // 它仍在后台继续流式生成，互不污染。
+      // 新会话：若内存已有消息桶（含后台流式内容）则保留，否则从 DB 载入。
+      if (state.messagesBySession[id] === undefined) {
+        const messages = await window.electronAPI.session.getMessages(id)
+        set({
+          activeSessionId: id,
+          messagesBySession: { ...state.messagesBySession, [id]: messages }
+        })
+      } else {
+        set({ activeSessionId: id })
+      }
     } catch (err) {
       console.error('切换会话失败:', err)
     }
@@ -366,7 +458,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   refreshMessages: async (sessionId: string) => {
     try {
       const messages = await window.electronAPI.session.getMessages(sessionId)
-      set({ messages })
+      set({ messagesBySession: { ...get().messagesBySession, [sessionId]: messages } })
     } catch (err) {
       console.error('刷新会话消息失败:', err)
     }
@@ -377,12 +469,38 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!state.activeSessionId) return
 
     // 草稿会话（不在会话列表里的临时 id）：第一条消息发出时才真正落库建会话，
-    // 此刻会话列表才出现新条目，名字取首条消息内容
+    // 此刻会话列表才出现新条目，名字取首条消息内容。草稿期间写入的消息/队列迁移到真会话 id。
     if (!state.sessions.some(s => s.id === state.activeSessionId)) {
       try {
         const session = await window.electronAPI.session.create(buildDraftName(content, nameHint) || undefined, undefined)
         const sessions = await window.electronAPI.session.list()
-        set({ sessions, activeSessionId: session.id })
+        const oldId = state.activeSessionId
+        const draftMsgs = oldId ? (state.messagesBySession[oldId] || []) : []
+        const draftPending = oldId ? (state.pendingBySession[oldId] || []) : []
+        const draftLoading = oldId ? (state.loadingBySession[oldId] || false) : false
+        const draftStopping = oldId ? (state.stoppingBySession[oldId] || false) : false
+        const newMessages = { ...state.messagesBySession }
+        const newPending = { ...state.pendingBySession }
+        const newLoading = { ...state.loadingBySession }
+        const newStopping = { ...state.stoppingBySession }
+        if (oldId) {
+          delete newMessages[oldId]
+          delete newPending[oldId]
+          delete newLoading[oldId]
+          delete newStopping[oldId]
+        }
+        newMessages[session.id] = draftMsgs
+        newPending[session.id] = draftPending
+        newLoading[session.id] = draftLoading
+        newStopping[session.id] = draftStopping
+        set({
+          sessions,
+          activeSessionId: session.id,
+          messagesBySession: newMessages,
+          pendingBySession: newPending,
+          loadingBySession: newLoading,
+          stoppingBySession: newStopping
+        })
       } catch (err) {
         console.error('创建会话失败:', err)
         return
@@ -390,19 +508,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
 
     const userMessage = makeUserMessage(content, images)
+    const curId = get().activeSessionId
+    if (!curId) return
 
     // 正在回复中：先保存用户消息并显示在聊天里，同时进入本地 FIFO 队列，
     // 当前回合结束后自动发送下一条。
-    if (state.isLoading) {
-      const sessionId = get().activeSessionId
-      if (!sessionId) return
-      await window.electronAPI.session.saveMessage(sessionId, userMessage).catch(() => {})
+    if (get().loadingBySession[curId]) {
+      await window.electronAPI.session.saveMessage(curId, userMessage).catch(() => {})
       set({
-        messages: [...state.messages, userMessage],
-        pendingMessages: [
-          ...state.pendingMessages,
-          { id: userMessage.id, content, images, intent }
-        ]
+        messagesBySession: { ...get().messagesBySession, [curId]: [...readMessages(get(), curId), userMessage] },
+        pendingBySession: {
+          ...get().pendingBySession,
+          [curId]: [
+            ...readPending(get(), curId),
+            { id: userMessage.id, content, images, intent }
+          ]
+        }
       })
       return
     }
@@ -411,16 +532,28 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   addMessage: (message: Message) => {
-    set({ messages: [...get().messages, message] })
+    const id = get().activeSessionId
+    if (!id) return
+    appendMessages(set, get, id, [...readMessages(get(), id), message])
   },
 
   updateLastAssistantMessage: (content: string) => {
-    const messages = [...get().messages]
+    const id = get().activeSessionId
+    if (!id) return
+    const messages = [...readMessages(get(), id)]
     const lastMsg = messages[messages.length - 1]
     if (lastMsg && lastMsg.role === 'assistant') {
       lastMsg.content = content
-      set({ messages })
+      appendMessages(set, get, id, messages)
     }
+  },
+
+  setPendingFormatAccept: (payload) => {
+    set({ pendingFormatAccept: payload })
+  },
+
+  clearPendingFormatAccept: () => {
+    set({ pendingFormatAccept: null })
   },
 
   refreshSessions: async () => {
@@ -439,10 +572,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       // 如果当前打开的就是该渠道会话，把新消息实时追加到聊天区
       if (state.activeSessionId === data.sessionId) {
-        const known = new Set(state.messages.map(m => m.sourceId).filter(Boolean))
+        const known = new Set((state.messagesBySession[data.sessionId] || []).map(m => m.sourceId).filter(Boolean))
         const fresh = data.messages.filter(m => !m.sourceId || !known.has(m.sourceId))
         if (fresh.length > 0) {
-          set({ messages: [...state.messages, ...fresh] })
+          appendMessages(set, get, data.sessionId, [...(state.messagesBySession[data.sessionId] || []), ...fresh])
         }
       }
 

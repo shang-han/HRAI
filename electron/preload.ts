@@ -38,7 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('chat:send', message, sessionId, modelOverride, images, intent),
     stream: (message: string, sessionId: string, modelOverride?: string, images?: string[], intent?: any) =>
       ipcRenderer.invoke('chat:stream', message, sessionId, modelOverride, images, intent),
-    stop: () => ipcRenderer.invoke('chat:stop'),
+    stop: (sessionId?: string) => ipcRenderer.invoke('chat:stop', sessionId),
     command: (command: string, sessionId: string) =>
       ipcRenderer.invoke('chat:command', command, sessionId),
     onStreamData: (channel: string, callback: (data: any) => void) => {
@@ -70,6 +70,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     export: (filePath: string) => ipcRenderer.invoke('template:export', filePath),
   },
 
+  // 格式模板库（P2 结构复用：用户惯用 xlsx 格式）
+  // 删除=归档（不物理删），导入冲突自动并存改名（不静默覆盖）—— 这两条由 store 保证
+  format: {
+    list: (includeArchived?: boolean) =>
+      ipcRenderer.invoke('format:list', includeArchived ? { includeArchived } : undefined),
+    get: (id: string) => ipcRenderer.invoke('format:get', id),
+    preview: (id: string) => ipcRenderer.invoke('format:preview', id),
+    candidates: (dir?: string) => ipcRenderer.invoke('format:candidates', dir ? { dir } : undefined),
+    extract: (filePath: string) => ipcRenderer.invoke('format:extract', { filePath }),
+    save: (input: any) => ipcRenderer.invoke('format:save', input),
+    update: (id: string, patch: any) => ipcRenderer.invoke('format:update', id, patch),
+    delete: (id: string) => ipcRenderer.invoke('format:delete', id),
+    reject: (id: string) => ipcRenderer.invoke('format:reject', id),
+    // P1-2 隐式接受：套用后未拒绝且继续发消息时由前端触发（acceptCount++，可升 active）
+    accept: (id: string) => ipcRenderer.invoke('format:accept', id),
+    exportAll: () => ipcRenderer.invoke('format:exportAll'),
+    importAll: () => ipcRenderer.invoke('format:importAll'),
+    // P2 第 6 步：主进程在 prepare() 命中格式时推一次，ChatArea 据此显示套用提示条
+    onApplied: (callback: (payload: any) => void) => {
+      const listener = (_event: any, payload: any) => callback(payload)
+      ipcRenderer.on('format:applied', listener)
+      return () => ipcRenderer.removeListener('format:applied', listener)
+    }
+  },
+
   // 定时任务/提醒模块
   schedule: {
     list: () => ipcRenderer.invoke('schedule:list'),
@@ -88,6 +113,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     export: (format: string, content: any, filePath?: string) =>
       ipcRenderer.invoke('file:export', format, content, filePath),
     import: () => ipcRenderer.invoke('file:import'),
+  },
+
+  // 企业文档资产模块（用户确认的产出文件 -> AI 可检索引用的知识资产）
+  knowledge: {
+    list: () => ipcRenderer.invoke('knowledge:list'),
+    candidates: (sessionId?: string) => ipcRenderer.invoke('knowledge:candidates', sessionId),
+    add: (filePath: string, sessionId?: string) => ipcRenderer.invoke('knowledge:add', filePath, sessionId),
+    remove: (id: string) => ipcRenderer.invoke('knowledge:remove', id),
   },
 
   // 会话工作目录模块
@@ -172,6 +205,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('permission:request', listener)
       return () => ipcRenderer.removeListener('permission:request', listener)
     },
+    // 审批结束（用户点了允许/拒绝，或主进程超时自动拒绝）时推一次，供 ChatArea 收起兜底横幅。
+    // ipcRenderer.on 支持多个监听者，TopBar 已有的 onRequest 订阅不受影响。
+    onResolved: (callback: (data: { requestId: number }) => void) => {
+      const listener = (_event: any, data: any) => callback(data)
+      ipcRenderer.on('permission:resolved', listener)
+      return () => ipcRenderer.removeListener('permission:resolved', listener)
+    },
     respond: (requestId: number, allow: boolean) => ipcRenderer.invoke('permission:respond', requestId, allow),
   },
 
@@ -219,7 +259,7 @@ export interface ElectronAPI {
   chat: {
     send: (message: string, sessionId: string, modelOverride?: string, intent?: any) => Promise<any>
     stream: (message: string, sessionId: string, modelOverride?: string, intent?: any) => Promise<any>
-    stop: () => Promise<any>
+    stop: (sessionId?: string) => Promise<any>
     command: (command: string, sessionId: string) => Promise<any>
     onStreamData: (channel: string, callback: (data: any) => void) => () => void
   }
@@ -238,6 +278,21 @@ export interface ElectronAPI {
     delete: (id: string) => Promise<any>
     import: (filePath: string) => Promise<any>
     export: (filePath: string) => Promise<any>
+  }
+  format: {
+    list: (includeArchived?: boolean) => Promise<any[]>
+    get: (id: string) => Promise<any>
+    preview: (id: string) => Promise<any>
+    candidates: (dir?: string) => Promise<any[]>
+    extract: (filePath: string) => Promise<any>
+    save: (input: any) => Promise<any>
+    update: (id: string, patch: any) => Promise<any>
+    delete: (id: string) => Promise<any>
+    reject: (id: string) => Promise<any>
+    accept: (id: string) => Promise<any>
+    exportAll: () => Promise<any>
+    importAll: () => Promise<any>
+    onApplied: (callback: (payload: { sessionId: string; formatApplied: any }) => void) => () => void
   }
   schedule: {
     list: () => Promise<any[]>
@@ -297,6 +352,7 @@ export interface ElectronAPI {
   }
   permission: {
     onRequest: (callback: (data: any) => void) => () => void
+    onResolved: (callback: (data: { requestId: number }) => void) => () => void
     respond: (requestId: number, allow: boolean) => Promise<any>
   }
   company: {

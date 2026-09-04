@@ -9,9 +9,15 @@ import { ModelRouter } from './model-router'
 import { FileEngine } from './file-engine'
 import { LogManager } from './log-manager'
 import { IntentRouter, IntentMeta } from './intent-router'
+import { getFormatStore } from './format/format-store'
+import { registerFormatIpc } from './format/format-ipc'
+import { snapshotOutputDir, harvestNewXlsx } from './format/format-signals'
+import type { OutputSnapshot } from './format/format-signals'
+import type { SkeletonStore } from './format/skeleton-store'
 import { ChannelManager } from './channel-engine/channel-manager'
 import { GiteeUpdater } from './gitee-updater'
 import { ChannelId } from './channel-engine/types'
+import { KnowledgeManager } from './knowledge-manager'
 
 let mainWindow: BrowserWindow | null = null
 let hermesManager: HermesManager
@@ -23,8 +29,14 @@ let logManager: LogManager
 let intentRouter: IntentRouter
 let channelManager: ChannelManager
 let giteeUpdater: GiteeUpdater
+let knowledgeManager: KnowledgeManager
+// P2 结构复用：格式模板库单例。召回（intent-router）与 IPC（format:*）共用同一实例，
+// 否则「prompt 里套用的格式」和「我的格式 Tab 里看到的」会是两个互不可见的状态。
+let formatStore: SkeletonStore | null = null
 let tray: Tray | null = null
 let scheduleTimer: ReturnType<typeof setInterval> | null = null
+// P1-3：格式模板 90 天衰减的每日定时器
+let formatDecayTimer: ReturnType<typeof setInterval> | null = null
 let isQuitting = false
 let closeToTrayHintShown = false
 
@@ -37,10 +49,19 @@ let savedNormalBounds: Electron.Rectangle | null = null
 const hermesSessions = new Map<string, string>()
 // ACP 审批请求 -> Promise resolve
 const pendingApprovals = new Map<number, (allow: boolean) => void>()
+// 权限审批自动拒绝超时。改这个值必须同步改 ChatArea 的 PERMISSION_TIMEOUT_SEC（横幅倒计时），
+// 两者不一致时横幅会显示错误的时间或提前收起。
+const PERMISSION_TIMEOUT_MS = 60 * 1000
 // 前端会话 -> 上下文占用/缓存用量快照。
 // HermesManager 只认 ACP 会话 id，这里保存反查后的结果，
 // 供渲染进程挂载/切会话时一次性取（IPC 推送只覆盖"变化时"）。
 const usageBySession = new Map<string, any>()
+
+// P1-1：output 目录 -> 进行中的采集任务（taskId）集合。
+// 两个任务同时跑、共用一个 output：快照按任务隔离但目录不隔离，A 的采集可能把
+// B 刚产出的文件挂到 A 的 intentId。对策是「宁可不采，不可错采」：
+// 同目录还有别的任务在采集窗口内时，本趟采集直接跳过。
+const harvestTasksByDir = new Map<string, Set<string>>()
 
 /**
  * 聊天前置检查：返回"为什么不能用"的说明，null 表示可以发送。
@@ -288,8 +309,42 @@ async function initializeApp() {
   // 初始化 Hermes 管理器
   hermesManager = new HermesManager(logManager)
 
+  // 初始化企业文档资产库（确认采纳的文件 -> 结构化资产，供意图路由检索注入）
+  knowledgeManager = new KnowledgeManager(logManager)
+  knowledgeManager.init()
+  intentRouter.setKnowledgeManager(knowledgeManager)
+
   // 提示词里的"当前工作目录"要按会话真实 cwd 生成，先把内置工作区告诉意图路由
   intentRouter.setDefaultWorkDir(hermesManager.getWorkspacePath())
+
+  // 初始化格式模板库（P2 结构复用：把用户惯用格式注入 prompt）。
+  // 必须 await：registerIpcHandlers() 在下面就要用这个实例注册 format:* 通道。
+  // 失败只降级（结构复用不可用），不阻断启动。
+  try {
+    formatStore = await getFormatStore()
+    intentRouter.setFormatStore(formatStore)
+    logManager.info('格式模板库初始化完成')
+    // P1-3：90 天衰减此前零调用，永不生效。启动即跑一次，之后每天一次。
+    // 衰减配置默认只含 candidate/active（不含 instance），不会打断复用累计；
+    // 失败只 warn —— 衰减是后台清理，绝不能阻断启动。
+    const runDecay = (s: SkeletonStore) => {
+      void s.applyDecay()
+        .then((r) => {
+          if (r.decayed.length > 0) {
+            logManager.info(`[格式衰减] 扫描 ${r.scanned} 条，归档 ${r.decayed.length} 条长期未用模板`)
+          }
+        })
+        .catch((err: any) => {
+          logManager.warn(`[格式衰减] 执行失败（不影响主流程）：${err?.message || err}`)
+        })
+    }
+    runDecay(formatStore)
+    formatDecayTimer = setInterval(() => {
+      if (formatStore) runDecay(formatStore)
+    }, 24 * 60 * 60 * 1000)
+  } catch (err: any) {
+    logManager.warn(`格式模板库初始化失败，结构复用不可用: ${err.message}`)
+  }
 
   // 清理旧版本遗留的 gateway/channel_sync 进程，避免微信/企微双通道抢消息
   await hermesManager.killLegacyGatewayProcesses().catch((err: any) => {
@@ -307,13 +362,16 @@ async function initializeApp() {
     getMode: () => (storageManager.getConfig() as any)?.permissionMode || 'ask',
     requestApproval: (payload) => new Promise((resolve) => {
       pendingApprovals.set(payload.requestId, resolve)
-      // 防止窗口未打开时审批挂死：5 分钟后自动拒绝
+      // 防止窗口未打开时审批挂死：60 秒后自动拒绝。
+      // 宁可让用户看到失败重发，也不要干等 5 分钟 —— 弹窗被遮挡时用户根本不知道要审批。
       setTimeout(() => {
         if (pendingApprovals.has(payload.requestId)) {
           pendingApprovals.delete(payload.requestId)
           resolve(false)
+          // 超时路径也要推 resolved，否则 ChatArea 的兜底横幅不会消失（会一直显示倒计时）
+          mainWindow?.webContents.send('permission:resolved', { requestId: payload.requestId })
         }
-      }, 5 * 60 * 1000)
+      }, PERMISSION_TIMEOUT_MS)
       mainWindow?.webContents.send('permission:request', payload)
     })
   })
@@ -489,6 +547,86 @@ function dropHermesSession(sessionId: string): void {
   mainWindow?.webContents.send('usage:update', { sessionId, usage: null })
 }
 
+/**
+ * 会话的产出目录（P0-2）：自定义 workDir 优先，没有回退内置工作区。
+ * 必须与 knowledge:candidates 的取目录口径一致，否则自定义目录会话的新产出全漏采。
+ */
+function getSessionOutputDir(sessionId?: string): string {
+  const workDir = storageManager.getSessionById(sessionId || '')?.workDir || hermesManager.getWorkspacePath()
+  return path.join(workDir, 'output')
+}
+
+/** P1-1：任务窗口起点（打快照时）注册，采集最后一趟跑完后注销 */
+function registerHarvestTask(dir: string, taskId: string): void {
+  if (!dir || !taskId) return
+  let set = harvestTasksByDir.get(dir)
+  if (!set) {
+    set = new Set()
+    harvestTasksByDir.set(dir, set)
+  }
+  set.add(taskId)
+}
+
+/** P1-1：注销采集任务（最后一趟跑完 / 任务出错提前收摊时调用），空集合顺手删键防泄漏 */
+function unregisterHarvestTask(dir: string, taskId: string): void {
+  const set = harvestTasksByDir.get(dir)
+  if (!set) return
+  set.delete(taskId)
+  if (set.size === 0) harvestTasksByDir.delete(dir)
+}
+
+/** P1-1：同目录是否还有「别的」任务在采集窗口内 —— 有就不能采，新文件可能属于别的意图 */
+function hasOtherHarvestTask(dir: string, taskId: string): boolean {
+  const set = harvestTasksByDir.get(dir)
+  if (!set) return false
+  for (const id of set) {
+    if (id !== taskId) return true
+  }
+  return false
+}
+
+/**
+ * P2 第 6C 步：采纳信号自动采集（设计 §7 信号③）。
+ * 任务完成后把 output 目录里「本次新产出」的 xlsx 抽骨架交给 formatStore.addInstance——
+ * 同族聚合、useCount++、累计升格全由 store 负责。两趟扫描（t+3s 主扫、t+30s 兜底晚落盘的文件），
+ * 快照在 harvest 内部回写，第二趟不会重复计数。后台增强，任何失败只记日志。
+ *
+ * dir 由调用方按会话 workDir 解析后传入（P0-2）；taskId 用于并发任务互斥（P1-1）。
+ */
+function scheduleFormatHarvest(prepared: ReturnType<IntentRouter['prepare']>, snapshot: OutputSnapshot, dir: string) {
+  if (!formatStore || !prepared.intent) return
+  const taskId = prepared.taskId
+  const ctx = {
+    intentId: prepared.intent.id,
+    intentLabel: prepared.intent.labels?.[0],
+    workflow: prepared.intent.workflow
+  }
+  const run = async (tag: string, isLast: boolean) => {
+    try {
+      // P1-1：并发任务共用同一 output 目录时，快照 diff 无法区分新文件归属哪个意图，
+      // 错采会把 B 任务的产出挂到 A 的 intentId 上 —— 宁可不采，不可错采。
+      if (hasOtherHarvestTask(dir, taskId)) {
+        logManager.warn('[格式信号采集] 多个任务共用输出目录，为避免跨意图误归属，本次跳过')
+        return
+      }
+      const report = await harvestNewXlsx(formatStore!, dir, snapshot, ctx)
+      if (report.harvested > 0) {
+        const detail = report.outcomes
+          .map(o => `${path.basename(o.filePath)}→${o.action}${o.promotedTo ? `（升格为${o.promotedTo}）` : ''}`)
+          .join('、')
+        logManager.info(`[格式信号采集:${tag}] 新产出 ${report.harvested} 个 xlsx：${detail}`)
+      }
+    } catch (err: any) {
+      logManager.warn(`[格式信号采集:${tag}] 失败（不影响主流程）：${err?.message || err}`)
+    } finally {
+      // 最后一趟（t+30s）跑完即注销本任务；跳过/失败也要注销，否则会把同目录后续采集永久卡死
+      if (isLast) unregisterHarvestTask(dir, taskId)
+    }
+  }
+  setTimeout(() => { void run('t+3s', false) }, 3_000)
+  setTimeout(() => { void run('t+30s', true) }, 30_000)
+}
+
 function registerIpcHandlers() {
   // ============ 激活模块 ============
   ipcMain.handle('activation:activate', async (_event, code: string) => {
@@ -596,6 +734,9 @@ function registerIpcHandlers() {
   ipcMain.handle('chat:stream', async (_event, message: string, sessionId: string, _modelOverride?: string, images?: string[], intentMeta?: IntentMeta) => {
     const channel = `chat:stream:${sessionId}:${Date.now()}`
     const send = (payload: any) => mainWindow?.webContents.send(channel, payload)
+    // P1 perf：首 chunk 延迟埋点（从 IPC 起算 → 模型首 token 抵达）
+    const tIpcStart = Date.now()
+    let firstChunkLogged = false
 
     // 带图片时直接走多模态模型，不经过 Hermes 文本 ACP（Hermes 目前不读图）
     if (images && images.length > 0) {
@@ -621,6 +762,14 @@ function registerIpcHandlers() {
 
     // P0 隐形内核：路由业务意图，装配 skill/工作流/输出契约，原文照存照显
     const prepared = intentRouter.prepare(message, intentMeta, sessionId)
+
+    // P2 第 6 步：把"本次实际套用了哪个格式模板"推给前端，让 ChatArea 显示套用提示条
+    if (prepared.formatApplied) {
+      mainWindow?.webContents.send('format:applied', {
+        sessionId: sessionId || '',
+        formatApplied: prepared.formatApplied
+      })
+    }
 
     // 渠道会话双向桥接：客户端发送的消息复用渠道 ACP 会话，回复同时发回渠道
     if (channelManager.handleClientTurn(sessionId, prepared, send)) {
@@ -667,19 +816,36 @@ function registerIpcHandlers() {
       return { channel, error: sessionResult.error }
     }
 
+    // P2 6C：发任务前快照 output，任务完成后 diff 出新产出 xlsx 做信号采集。
+    // 目录按会话 workDir 解析（P0-2：自定义目录会话不再漏采）；
+    // 任务窗口起点注册采集任务（P1-1：并发任务共用目录时互斥，防止跨意图误归属）
+    const outputDir = getSessionOutputDir(sessionId)
+    const formatSnap = snapshotOutputDir(outputDir)
+    registerHarvestTask(outputDir, prepared.taskId)
+
     hermesManager.sendPrompt(prepared.prompt, sessionResult.sessionId, {
-      onText: (text: string) => send({ type: 'chunk', data: text }),
+      onText: (text: string) => {
+        if (!firstChunkLogged) {
+          firstChunkLogged = true
+          logManager.info(`[perf] chat:stream 首 chunk 延迟 ${Date.now() - tIpcStart}ms（从 IPC 起到首个 token）`)
+        }
+        send({ type: 'chunk', data: text })
+      },
       onThinking: (text: string) => send({ type: 'thinking', data: text }),
       onDone: () => {
         intentRouter.recordEnd(prepared.taskId, 'done')
+        scheduleFormatHarvest(prepared, formatSnap, outputDir)
         send({ type: 'done' })
       },
       onError: (error: string) => {
         intentRouter.recordEnd(prepared.taskId, 'error', error)
+        // 任务出错不采集，采集任务注册要就地撤掉（P1-1），否则会卡住同目录后续采集
+        unregisterHarvestTask(outputDir, prepared.taskId)
         send({ type: 'error', data: friendlyModelError(error) })
       }
     }).catch((err: any) => {
       intentRouter.recordEnd(prepared.taskId, 'error', err.message)
+      unregisterHarvestTask(outputDir, prepared.taskId)
       send({ type: 'error', data: friendlyModelError(err.message) })
     })
 
@@ -701,6 +867,14 @@ function registerIpcHandlers() {
     }
 
     const prepared = intentRouter.prepare(message, intentMeta, sessionId)
+
+    // P2 第 6 步：把"本次实际套用了哪个格式模板"推给前端，让 ChatArea 显示套用提示条
+    if (prepared.formatApplied) {
+      mainWindow?.webContents.send('format:applied', {
+        sessionId: sessionId || '',
+        formatApplied: prepared.formatApplied
+      })
+    }
 
     // 渠道会话双向桥接（非流式备用路径）
     const channelResult = await channelManager.handleClientSend(sessionId, prepared)
@@ -738,6 +912,13 @@ function registerIpcHandlers() {
       return { success: false, error: sessionResult.error }
     }
 
+    // P2 6C：发任务前快照 output，任务完成后 diff 出新产出 xlsx 做信号采集。
+    // 目录按会话 workDir 解析（P0-2：自定义目录会话不再漏采）；
+    // 任务窗口起点注册采集任务（P1-1：并发任务共用目录时互斥，防止跨意图误归属）
+    const outputDir = getSessionOutputDir(sessionId)
+    const formatSnap = snapshotOutputDir(outputDir)
+    registerHarvestTask(outputDir, prepared.taskId)
+
     return new Promise((resolve) => {
       let full = ''
       hermesManager.sendPrompt(prepared.prompt, sessionResult.sessionId, {
@@ -745,23 +926,34 @@ function registerIpcHandlers() {
         onThinking: () => {},
         onDone: () => {
           intentRouter.recordEnd(prepared.taskId, 'done')
+          scheduleFormatHarvest(prepared, formatSnap, outputDir)
           resolve({ success: true, content: full })
         },
         onError: (error: string) => {
           intentRouter.recordEnd(prepared.taskId, 'error', error)
+          // 任务出错不采集，采集任务注册要就地撤掉（P1-1），否则会卡住同目录后续采集
+          unregisterHarvestTask(outputDir, prepared.taskId)
           resolve({ success: false, error: friendlyModelError(error) })
         }
       }).catch((err: any) => {
         intentRouter.recordEnd(prepared.taskId, 'error', err.message)
+        unregisterHarvestTask(outputDir, prepared.taskId)
         resolve({ success: false, error: friendlyModelError(err.message) })
       })
     })
   })
 
   // 停止生成
-  ipcMain.handle('chat:stop', async () => {
-    modelRouter.abortAll()
-    hermesManager.stopGeneration().catch(() => {})
+  // 支持 per-session：传入 sessionId 时只取消该会话的后台流式 + Hermes 回合，
+  // 不影响其他正在生成的会话；不传则保持旧行为（全局停止，兼容旧调用方）。
+  ipcMain.handle('chat:stop', async (_event, sessionId?: string) => {
+    if (sessionId) {
+      hermesManager.cancelSession(sessionId).catch(() => {})
+      modelRouter.abortBySessionId(sessionId)
+    } else {
+      modelRouter.abortAll()
+      hermesManager.stopGeneration().catch(() => {})
+    }
     return true
   })
 
@@ -856,6 +1048,33 @@ function registerIpcHandlers() {
     return fileEngine.exportTemplates(filePath, templates)
   })
 
+  // ============ 格式模板库（P2 结构复用） ============
+  // 处理器逻辑在 format-handlers.ts（不依赖 electron，可单测）；这里只做注册。
+  // format:candidates 需要扫 workspace/output 找候选 xlsx，所以把输出目录注进去。
+  if (formatStore) {
+    registerFormatIpc(formatStore, {
+      getWorkspaceOutputDir: () => path.join(hermesManager.getWorkspacePath(), 'output'),
+      dialogs: {
+        saveJson: async (defaultPath: string) => {
+          const r = await dialog.showSaveDialog(mainWindow!, {
+            title: '导出「我的格式」',
+            defaultPath,
+            filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+          })
+          return r.canceled ? null : (r.filePath || null)
+        },
+        openJson: async () => {
+          const r = await dialog.showOpenDialog(mainWindow!, {
+            title: '导入「我的格式」',
+            properties: ['openFile'],
+            filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+          })
+          return (r.canceled || r.filePaths.length === 0) ? null : r.filePaths[0]
+        }
+      }
+    })
+  }
+
   // ============ 定时任务/提醒模块 ============
   ipcMain.handle('schedule:list', async () => {
     return storageManager.getScheduledTasks()
@@ -914,6 +1133,25 @@ function registerIpcHandlers() {
     })
     if (result.canceled || result.filePaths.length === 0) return { success: false }
     return fileEngine.importFile(result.filePaths[0])
+  })
+
+  // ============ 企业文档资产模块 ============
+  ipcMain.handle('knowledge:list', async () => {
+    return knowledgeManager.list()
+  })
+
+  // 列某会话产出目录里的候选文件（采纳弹窗勾选用）
+  ipcMain.handle('knowledge:candidates', async (_event, sessionId?: string) => {
+    const workDir = storageManager.getSessionById(sessionId || '')?.workDir || hermesManager.getWorkspacePath()
+    return knowledgeManager.candidates(workDir)
+  })
+
+  ipcMain.handle('knowledge:add', async (_event, filePath: string, sessionId?: string) => {
+    return knowledgeManager.add(filePath, sessionId)
+  })
+
+  ipcMain.handle('knowledge:remove', async (_event, id: string) => {
+    return knowledgeManager.remove(id)
   })
 
   // ============ 工作目录模块 ============
@@ -1163,6 +1401,9 @@ end tell`
       pendingApprovals.delete(requestId)
       resolve(allow)
     }
+    // 通知 ChatArea 收起兜底横幅。无论上面是否 resolve 到（已被超时自动拒绝）都要推，
+    // 否则横幅会一直挂着等一个永远不会再来的信号。
+    mainWindow?.webContents.send('permission:resolved', { requestId })
     return true
   })
 
@@ -1419,6 +1660,10 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  if (formatDecayTimer) {
+    clearInterval(formatDecayTimer)
+    formatDecayTimer = null
+  }
   channelManager?.stopAll().finally(() => hermesManager?.stop())
 })
 

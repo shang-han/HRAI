@@ -12,13 +12,14 @@ import OfflineBar from './components/OfflineBar'
 import HermesStatusBar from './components/HermesStatusBar'
 import TemplateManagerView from './components/TemplateManagerView'
 import ScheduleView from './components/ScheduleView'
+import FormatManagerView from './components/FormatManagerView'
 
 const App: React.FC = () => {
   const [activated, setActivated] = useState<boolean | null>(null)
   const [onboarding, setOnboarding] = useState<boolean | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
-  // 右侧主区域视图：chat=聊天 / templates=预设指令库管理页 / schedules=定时提醒任务页
-  const [mainView, setMainView] = useState<'chat' | 'templates' | 'schedules'>('chat')
+  // 右侧主区域视图：chat=聊天 / templates=预设指令库管理页 / schedules=定时提醒任务页 / formats=我的格式
+  const [mainView, setMainView] = useState<'chat' | 'templates' | 'schedules' | 'formats'>('chat')
   // 指令库只读模式：输入框入口只能点选填入；编辑/新建只能从侧边栏入口进入
   const [templatesReadonly, setTemplatesReadonly] = useState(false)
   const themeMode = useConfigStore(state => state.theme)
@@ -27,14 +28,14 @@ const App: React.FC = () => {
   const stopGenerating = useSessionStore(state => state.stopGenerating)
   const activeSessionId = useSessionStore(state => state.activeSessionId)
   // 空态判定：决定输入框居中还是落底（只订阅长度，避免流式更新时整个 App 重渲染）
-  const emptyChat = useSessionStore(state => state.messages.length === 0)
+  const emptyChat = useSessionStore(state => !(state.messagesBySession[state.activeSessionId ?? '']?.length))
 
   useEffect(() => {
     // 加载配置（模型、主题、快捷键等）
     loadConfig()
 
-    // 监听停止生成事件
-    const handleStop = () => stopGenerating()
+    // 监听停止生成事件（只停当前 active 会话，不影响后台其他会话）
+    const handleStop = () => stopGenerating(activeSessionId ?? undefined)
     window.addEventListener('stopGeneration', handleStop)
 
     // 定时提醒/任务触发后，若目标会话是当前会话则刷新消息
@@ -175,6 +176,7 @@ const App: React.FC = () => {
             setMainView('templates')
           }}
           onOpenSchedules={() => setMainView('schedules')}
+          onOpenFormats={() => setMainView('formats')}
         />
 
         {/* 右侧主区域 */}
@@ -188,6 +190,11 @@ const App: React.FC = () => {
             <>
               <TopBar visible={false} />
               <ScheduleView onBack={() => setMainView('chat')} />
+            </>
+          ) : mainView === 'formats' ? (
+            <>
+              <TopBar visible={false} />
+              <FormatManagerView onBack={() => setMainView('chat')} />
             </>
           ) : (
             <>
